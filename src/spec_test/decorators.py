@@ -1,5 +1,6 @@
 """Decorators for linking tests to specifications."""
 
+import asyncio
 import functools
 from typing import Callable, Optional
 
@@ -50,16 +51,29 @@ def spec(
         marked = pytest.mark.spec(func)
         marked = pytest.mark.spec_id(spec_id)(marked)
 
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+        # Create appropriate wrapper based on whether func is async
+        if asyncio.iscoroutinefunction(func):
 
-        # Preserve spec metadata on wrapper
-        wrapper._spec_id = spec_id
-        wrapper._spec_description = description
-        wrapper._spec_notes = verification_notes
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                return await func(*args, **kwargs)
 
-        return wrapper
+            # Preserve spec metadata on wrapper
+            async_wrapper._spec_id = spec_id
+            async_wrapper._spec_description = description
+            async_wrapper._spec_notes = verification_notes
+            return async_wrapper
+        else:
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            # Preserve spec metadata on wrapper
+            wrapper._spec_id = spec_id
+            wrapper._spec_description = description
+            wrapper._spec_notes = verification_notes
+            return wrapper
 
     return decorator
 
@@ -103,11 +117,22 @@ def specs(*spec_ids: str):
         for sid in spec_ids:
             marked = pytest.mark.spec_id(sid)(marked)
 
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+        # Create appropriate wrapper based on whether func is async
+        if asyncio.iscoroutinefunction(func):
 
-        wrapper._spec_ids = spec_ids
-        return wrapper
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                return await func(*args, **kwargs)
+
+            async_wrapper._spec_ids = spec_ids
+            return async_wrapper
+        else:
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            wrapper._spec_ids = spec_ids
+            return wrapper
 
     return decorator

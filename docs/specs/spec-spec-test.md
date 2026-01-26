@@ -10,6 +10,9 @@ spec-test is a tool for specification-driven development that links requirements
 - **DEC-002**: @spec decorator adds pytest marker to test
 - **DEC-003**: @spec decorator preserves function metadata
 - **DEC-004**: @specs decorator supports multiple spec IDs
+- **DEC-005**: @spec decorator preserves async function behavior
+- **DEC-006**: @spec decorator works regardless of decorator order with pytest.mark.asyncio
+- **DEC-007**: @specs decorator preserves async function behavior
 
 ## Collector Requirements
 

@@ -70,3 +70,66 @@ def test_specs_decorator_multiple_ids():
     assert "TEST-C" in registry
     assert hasattr(multi_spec_test, "_spec_ids")
     assert multi_spec_test._spec_ids == ("TEST-A", "TEST-B", "TEST-C")
+
+
+@spec("DEC-005", "@spec decorator preserves async function behavior")
+@pytest.mark.asyncio
+async def test_spec_decorator_preserves_async():
+    """Test that @spec decorator works with async functions."""
+    import asyncio
+
+    @spec("TEST-ASYNC-001", "Async test description")
+    async def async_sample_test():
+        await asyncio.sleep(0.001)
+        return "async_result"
+
+    # Verify the wrapper is still a coroutine function
+    assert asyncio.iscoroutinefunction(async_sample_test)
+
+    # Verify it can be awaited and returns correct result
+    result = await async_sample_test()
+    assert result == "async_result"
+
+    # Verify metadata is preserved
+    assert hasattr(async_sample_test, "_spec_id")
+    assert async_sample_test._spec_id == "TEST-ASYNC-001"
+
+
+@spec("DEC-006", "@spec decorator works regardless of decorator order with pytest.mark.asyncio")
+@pytest.mark.asyncio
+async def test_spec_decorator_order_independence():
+    """Test that @spec works regardless of decorator ordering with pytest.mark.asyncio."""
+    import asyncio
+
+    # Test with @spec below @pytest.mark.asyncio (the problematic order before fix)
+    @spec("TEST-ASYNC-002", "Async test with spec below mark")
+    async def async_test_spec_below():
+        await asyncio.sleep(0.001)
+        return "result"
+
+    assert asyncio.iscoroutinefunction(async_test_spec_below)
+    result = await async_test_spec_below()
+    assert result == "result"
+
+
+@spec("DEC-007", "@specs decorator preserves async function behavior")
+@pytest.mark.asyncio
+async def test_specs_decorator_preserves_async():
+    """Test that @specs decorator works with async functions."""
+    import asyncio
+
+    @specs("TEST-ASYNC-A", "TEST-ASYNC-B")
+    async def async_multi_spec_test():
+        await asyncio.sleep(0.001)
+        return "multi_async_result"
+
+    # Verify the wrapper is still a coroutine function
+    assert asyncio.iscoroutinefunction(async_multi_spec_test)
+
+    # Verify it can be awaited and returns correct result
+    result = await async_multi_spec_test()
+    assert result == "multi_async_result"
+
+    # Verify metadata is preserved
+    assert hasattr(async_multi_spec_test, "_spec_ids")
+    assert async_multi_spec_test._spec_ids == ("TEST-ASYNC-A", "TEST-ASYNC-B")

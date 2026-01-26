@@ -38,7 +38,7 @@ def _discover_from_files(tests_dir: Path) -> dict[str, SpecTest]:
             continue
 
         for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
 
             spec_info = _extract_spec_decorator(node)
@@ -58,7 +58,9 @@ def _discover_from_files(tests_dir: Path) -> dict[str, SpecTest]:
     return spec_tests
 
 
-def _extract_spec_decorator(node: ast.FunctionDef) -> Optional[tuple[str, str]]:
+def _extract_spec_decorator(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> Optional[tuple[str, str]]:
     """Extract @spec decorator info from a function node."""
     for decorator in node.decorator_list:
         if isinstance(decorator, ast.Call):
