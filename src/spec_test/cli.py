@@ -126,6 +126,79 @@ def check(
 
 
 @app.command()
+def context(
+    path: Path = typer.Argument(
+        Path("."),
+        help="Project root to search for CLAUDE.md",
+    ),
+):
+    """
+    Output CLAUDE.md content for LLM context.
+
+    Searches for CLAUDE.md in the project root and outputs its contents.
+    Useful for providing spec-test workflow instructions to AI assistants.
+    """
+    claude_md = path / "CLAUDE.md"
+
+    if not claude_md.exists():
+        # Try to output a default CLAUDE.md template
+        default_content = """# CLAUDE.md - Agent Instructions
+
+## Specification-Driven Development
+
+This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
+
+## Workflow
+
+1. **Specs live in** `docs/specs/*.md`
+2. **Tests use** `@spec("ID", "description")` decorator to link to specs
+3. **Run** `spec-test verify` to check all specs have passing tests
+
+## Spec Format
+
+In markdown files, specs are defined as:
+```
+- **PREFIX-001**: Description of requirement
+```
+
+## Test Format
+
+```python
+from spec_test import spec
+
+@spec("PREFIX-001", "Description")
+def test_something():
+    # Test implementation
+    assert result == expected
+```
+
+## Commands
+
+```bash
+spec-test verify          # Check all specs have passing tests
+spec-test list-specs      # List all specs
+spec-test check PREFIX-001  # Check single spec
+spec-test context         # Output this context for LLMs
+```
+
+## Rules
+
+1. Never claim a feature works without a test
+2. Every spec ID in docs/specs must have a corresponding `@spec` test
+3. Run `spec-test verify` before committing - it must pass
+4. If a spec has no test, write the test first
+"""
+        console.print(
+            "[yellow]No CLAUDE.md found. Here's the default spec-test context:[/yellow]\n"
+        )
+        console.print(default_content)
+        return
+
+    content = claude_md.read_text()
+    console.print(content)
+
+
+@app.command()
 def init(
     path: Path = typer.Argument(
         Path("."),

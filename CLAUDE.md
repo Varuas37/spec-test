@@ -34,6 +34,7 @@ def test_something():
 spec-test verify          # Check all specs have passing tests
 spec-test list-specs      # List all specs
 spec-test check PREFIX-001  # Check single spec
+spec-test context         # Output CLAUDE.md for LLM context
 ```
 
 ## Rules
