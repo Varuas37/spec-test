@@ -1,0 +1,165 @@
+"""Command-line interface for spec-test."""
+
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich.console import Console
+
+from .collector import collect_specs
+from .reporter import Reporter
+from .verifier import SpecVerifier
+
+app = typer.Typer(
+    name="spec-test",
+    help="Specification-driven development tool with test verification",
+)
+console = Console()
+
+
+@app.command()
+def verify(
+    specs_dir: Path = typer.Option(
+        Path("docs/specs"),
+        "--specs",
+        "-s",
+        help="Directory containing spec markdown files",
+    ),
+    tests_dir: Path = typer.Option(
+        Path("tests"),
+        "--tests",
+        "-t",
+        help="Directory containing test files",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output markdown report to file",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Verbose output",
+    ),
+    fail_on_missing: bool = typer.Option(
+        True,
+        "--fail-on-missing/--no-fail-on-missing",
+        help="Exit with error if specs are missing tests",
+    ),
+):
+    """
+    Verify all specifications have passing tests.
+
+    Reads specs from markdown files, discovers @spec decorated tests,
+    and reports coverage.
+    """
+    verifier = SpecVerifier(
+        specs_dir=specs_dir,
+        tests_dir=tests_dir,
+    )
+
+    report = verifier.verify(verbose=verbose)
+
+    reporter = Reporter()
+    reporter.print_terminal(report)
+
+    if output:
+        reporter.generate_markdown(report, output)
+        console.print(f"\n[green]Report saved to {output}[/green]")
+
+    # Exit code
+    if report.failing > 0:
+        raise typer.Exit(code=1)
+    if fail_on_missing and report.missing > 0:
+        raise typer.Exit(code=2)
+
+
+@app.command()
+def list_specs(
+    specs_dir: Path = typer.Option(
+        Path("docs/specs"),
+        "--specs",
+        "-s",
+        help="Directory containing spec markdown files",
+    ),
+):
+    """List all specifications found in spec files."""
+    specs = collect_specs(specs_dir)
+
+    if not specs:
+        console.print("[yellow]No specifications found[/yellow]")
+        raise typer.Exit(code=0)
+
+    console.print(f"\n[bold]Found {len(specs)} specifications:[/bold]\n")
+
+    for spec in sorted(specs, key=lambda s: s.id):
+        console.print(f"  [cyan]{spec.id}[/cyan]: {spec.description}")
+        console.print(f"    [dim]{spec.source_file}:{spec.source_line}[/dim]")
+    console.print()
+
+
+@app.command()
+def check(
+    spec_id: str = typer.Argument(..., help="Spec ID to check (e.g., AUTH-001)"),
+    specs_dir: Path = typer.Option(Path("docs/specs"), "--specs", "-s"),
+    tests_dir: Path = typer.Option(Path("tests"), "--tests", "-t"),
+):
+    """Check a single specification."""
+    verifier = SpecVerifier(specs_dir=specs_dir, tests_dir=tests_dir)
+    result = verifier.verify_single(spec_id)
+
+    if not result:
+        console.print(f"[red]Spec {spec_id} not found[/red]")
+        raise typer.Exit(code=1)
+
+    reporter = Reporter()
+    status_str = reporter._status_emoji(result.status)
+
+    console.print(f"\n{status_str} [bold]{result.spec.id}[/bold]: {result.spec.description}")
+
+    if result.test:
+        console.print(f"  Test: [dim]{result.test.test_path}[/dim]")
+    if result.error_message:
+        console.print(f"  [red]{result.error_message}[/red]")
+
+
+@app.command()
+def init(
+    path: Path = typer.Argument(
+        Path("."),
+        help="Project root to initialize",
+    ),
+):
+    """Initialize spec-test in a project."""
+    specs_dir = path / "docs" / "specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create example spec file (must match spec-*.md pattern)
+    example_spec = specs_dir / "spec-example.md"
+    if not example_spec.exists():
+        example_spec.write_text("""# Example Specification
+
+## Overview
+This is an example specification file. Replace with your actual specs.
+Spec files must be named spec-*.md to be discovered.
+
+## Requirements
+
+### Core Features
+- **EXAMPLE-001**: The system should do something useful
+- **EXAMPLE-002**: The system should handle errors gracefully
+- **EXAMPLE-003** [manual]: Code follows project naming conventions
+""")
+
+    console.print(f"[green]Initialized spec-test in {path}[/green]")
+    console.print(f"   Created: {specs_dir}")
+    console.print(f"\nNext steps:")
+    console.print(f"  1. Edit {example_spec}")
+    console.print(f"  2. Write tests with @spec decorator")
+    console.print(f"  3. Run: spec-test verify")
+
+
+if __name__ == "__main__":
+    app()
