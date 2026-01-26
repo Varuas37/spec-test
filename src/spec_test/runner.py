@@ -37,23 +37,38 @@ def _discover_from_files(tests_dir: Path) -> dict[str, SpecTest]:
         except SyntaxError:
             continue
 
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+        # Process top-level functions
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                spec_info = _extract_spec_decorator(node)
+                if spec_info:
+                    spec_id, description = spec_info
+                    test_path = f"{py_file}::{node.name}"
+                    spec_tests[spec_id] = SpecTest(
+                        spec_id=spec_id,
+                        description=description,
+                        test_path=test_path,
+                        test_file=py_file,
+                        test_line=node.lineno,
+                    )
 
-            spec_info = _extract_spec_decorator(node)
-            if spec_info:
-                spec_id, description = spec_info
-                # Use file path format for pytest: /path/to/file.py::test_name
-                test_path = f"{py_file}::{node.name}"
-
-                spec_tests[spec_id] = SpecTest(
-                    spec_id=spec_id,
-                    description=description,
-                    test_path=test_path,
-                    test_file=py_file,
-                    test_line=node.lineno,
-                )
+            # Process methods inside classes
+            elif isinstance(node, ast.ClassDef):
+                class_name = node.name
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        spec_info = _extract_spec_decorator(item)
+                        if spec_info:
+                            spec_id, description = spec_info
+                            # pytest format: file.py::ClassName::method_name
+                            test_path = f"{py_file}::{class_name}::{item.name}"
+                            spec_tests[spec_id] = SpecTest(
+                                spec_id=spec_id,
+                                description=description,
+                                test_path=test_path,
+                                test_file=py_file,
+                                test_line=item.lineno,
+                            )
 
     return spec_tests
 

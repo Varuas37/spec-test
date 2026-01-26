@@ -22,6 +22,12 @@ spec-test is a tool for specification-driven development that links requirements
 - **COL-003**: Collector handles nested directories
 - **COL-004**: Collector only processes files matching spec-*.md pattern
 
+## Runner Requirements
+
+### Test Discovery
+- **RUN-001**: Runner discovers @spec decorated methods inside test classes
+- **RUN-002**: Runner generates correct pytest node ID for class-based tests
+
 ## Verifier Requirements
 
 ### Verification
