@@ -1,5 +1,6 @@
 """Command-line interface for spec-test."""
 
+from importlib import resources
 from pathlib import Path
 from typing import Optional
 
@@ -198,6 +199,38 @@ spec-test context         # Output this context for LLMs
     console.print(content)
 
 
+def _install_skills(path: Path) -> list[str]:
+    """Install AI agent skills from the package to the project.
+
+    Returns list of installed skill filenames.
+    """
+    skills_dir = path / ".claude" / "skills"
+    installed = []
+
+    try:
+        # Access the skills directory from the package
+        skills_pkg = resources.files("spec_test") / "skills"
+
+        # Check if skills directory exists in the package
+        if not skills_pkg.is_dir():
+            return []
+
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy each skill file
+        for skill_file in skills_pkg.iterdir():
+            if skill_file.is_file() and skill_file.name.endswith(".md"):
+                dest = skills_dir / skill_file.name
+                dest.write_text(skill_file.read_text())
+                installed.append(skill_file.name)
+
+    except (TypeError, AttributeError, FileNotFoundError):
+        # Skills package not available or not a directory
+        return []
+
+    return sorted(installed)
+
+
 @app.command()
 def init(
     path: Path = typer.Argument(
@@ -206,8 +239,10 @@ def init(
     ),
 ):
     """Initialize spec-test in a project."""
+    # Create specs directory
     specs_dir = path / "docs" / "specs"
     specs_dir.mkdir(parents=True, exist_ok=True)
+    console.print(f"Created {specs_dir}/")
 
     # Create example spec file (must match spec-*.md pattern)
     example_spec = specs_dir / "spec-example.md"
@@ -226,12 +261,65 @@ Spec files must be named spec-*.md to be discovered.
 - **EXAMPLE-003** [manual]: Code follows project naming conventions
 """)
 
-    console.print(f"[green]Initialized spec-test in {path}[/green]")
-    console.print(f"   Created: {specs_dir}")
-    console.print(f"\nNext steps:")
-    console.print(f"  1. Edit {example_spec}")
-    console.print(f"  2. Write tests with @spec decorator")
-    console.print(f"  3. Run: spec-test verify")
+    # Create CLAUDE.md with spec-test instructions
+    claude_md = path / "CLAUDE.md"
+    if not claude_md.exists():
+        claude_md.write_text("""# CLAUDE.md - Agent Instructions
+
+## Specification-Driven Development
+
+This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
+
+## Workflow
+
+1. **Specs live in** `docs/specs/*.md`
+2. **Tests use** `@spec("ID", "description")` decorator to link to specs
+3. **Run** `spec-test verify` to check all specs have passing tests
+
+## Spec Format
+
+In markdown files, specs are defined as:
+```
+- **PREFIX-001**: Description of requirement
+```
+
+## Test Format
+
+```python
+from spec_test import spec
+
+@spec("PREFIX-001", "Description")
+def test_something():
+    # Test implementation
+    assert result == expected
+```
+
+## Commands
+
+```bash
+spec-test verify          # Check all specs have passing tests
+spec-test list-specs      # List all specs
+spec-test check PREFIX-001  # Check single spec
+spec-test context         # Output CLAUDE.md for LLM context
+```
+
+## Rules
+
+1. Never claim a feature works without a test
+2. Every spec ID in docs/specs must have a corresponding `@spec` test
+3. Run `spec-test verify` before committing - it must pass
+4. If a spec has no test, write the test first
+""")
+        console.print("Created CLAUDE.md")
+
+    # Install AI agent skills
+    installed_skills = _install_skills(path)
+    if installed_skills:
+        console.print("Installed AI agent skills to .claude/skills/")
+        for skill in installed_skills:
+            console.print(f"  - {skill}")
+
+    console.print("\n[green]Ready! Run 'spec-test verify' to check your specs.[/green]")
 
 
 if __name__ == "__main__":

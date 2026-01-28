@@ -91,7 +91,9 @@ def test_init_command():
         result = runner.invoke(app, ["init", tmpdir])
 
         assert result.exit_code == 0
-        assert "Initialized spec-test" in result.output
+        assert "Created" in result.output
+        assert "docs/specs" in result.output
+        assert "CLAUDE.md" in result.output
 
         # Check directory was created
         specs_dir = Path(tmpdir) / "docs" / "specs"
@@ -100,6 +102,10 @@ def test_init_command():
         # Check example file was created (must match spec-*.md pattern)
         example_file = specs_dir / "spec-example.md"
         assert example_file.exists()
+
+        # Check CLAUDE.md was created
+        claude_file = Path(tmpdir) / "CLAUDE.md"
+        assert claude_file.exists()
 
 
 @spec("CLI-005", "Exit code 1 on test failures")
