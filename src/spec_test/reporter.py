@@ -87,6 +87,7 @@ class Reporter:
   [green]Passing:[/green]        {report.passing}
   [red]Failing:[/red]        {report.failing}
   [yellow]Missing Tests:[/yellow] {report.missing}
+  [dim]Skipped:[/dim]        {report.skipped}
 
   [bold]Coverage:[/bold]       {report.coverage_percent:.1f}%
 """

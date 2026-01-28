@@ -23,7 +23,7 @@ class SpecVerifier:
 
     def __init__(
         self,
-        specs_dir: str | Path = "docs/specs",
+        specs_dir: str | Path = "specs",
         tests_dir: str | Path = "tests",
         project_root: Optional[Path] = None,
     ):
@@ -73,6 +73,14 @@ class SpecVerifier:
         verbose: bool,
     ) -> SpecResult:
         """Verify a single specification."""
+
+        # Handle SKIP verification type
+        if spec.verification_type == VerificationType.SKIP:
+            return SpecResult(
+                spec=spec,
+                status=SpecStatus.SKIPPED,
+                error_message="Skipped",
+            )
 
         # Handle manual verification type
         if spec.verification_type == VerificationType.MANUAL:

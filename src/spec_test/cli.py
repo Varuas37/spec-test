@@ -24,7 +24,7 @@ console = Console()
 @app.command()
 def verify(
     specs_dir: Path = typer.Option(
-        Path("docs/specs"),
+        Path("specs"),
         "--specs",
         "-s",
         help="Directory containing spec markdown files",
@@ -152,7 +152,7 @@ def _run_coverage(tests_dir: Path, source_dir: Optional[Path], verbose: bool) ->
 @app.command()
 def list_specs(
     specs_dir: Path = typer.Option(
-        Path("docs/specs"),
+        Path("specs"),
         "--specs",
         "-s",
         help="Directory containing spec markdown files",
@@ -176,7 +176,7 @@ def list_specs(
 @app.command()
 def check(
     spec_id: str = typer.Argument(..., help="Spec ID to check (e.g., AUTH-001)"),
-    specs_dir: Path = typer.Option(Path("docs/specs"), "--specs", "-s"),
+    specs_dir: Path = typer.Option(Path("specs"), "--specs", "-s"),
     tests_dir: Path = typer.Option(Path("tests"), "--tests", "-t"),
 ):
     """Check a single specification."""
