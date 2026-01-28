@@ -1,11 +1,14 @@
 """Command-line interface for spec-test."""
 
+import subprocess
+import sys
 from importlib import resources
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 
 from .collector import collect_specs
 from .reporter import Reporter
@@ -13,7 +16,7 @@ from .verifier import SpecVerifier
 
 app = typer.Typer(
     name="spec-test",
-    help="Specification-driven development tool with test verification",
+    help="Make AI-generated code trustworthy through mathematical verification",
 )
 console = Console()
 
@@ -32,6 +35,11 @@ def verify(
         "-t",
         help="Directory containing test files",
     ),
+    source_dir: Optional[Path] = typer.Option(
+        None,
+        "--source",
+        help="Source directory for coverage (e.g., src/mypackage)",
+    ),
     output: Optional[Path] = typer.Option(
         None,
         "--output",
@@ -49,12 +57,23 @@ def verify(
         "--fail-on-missing/--no-fail-on-missing",
         help="Exit with error if specs are missing tests",
     ),
+    coverage: bool = typer.Option(
+        False,
+        "--coverage",
+        "-c",
+        help="Run with code coverage analysis",
+    ),
+    coverage_threshold: int = typer.Option(
+        80,
+        "--coverage-threshold",
+        help="Minimum coverage percentage required (default: 80)",
+    ),
 ):
     """
     Verify all specifications have passing tests.
 
     Reads specs from markdown files, discovers @spec decorated tests,
-    and reports coverage.
+    runs tests, and reports spec coverage. Optionally checks code coverage.
     """
     verifier = SpecVerifier(
         specs_dir=specs_dir,
@@ -66,15 +85,68 @@ def verify(
     reporter = Reporter()
     reporter.print_terminal(report)
 
+    # Run coverage analysis if requested
+    coverage_percent = None
+    if coverage:
+        coverage_percent = _run_coverage(tests_dir, source_dir, verbose)
+
+        if coverage_percent is not None:
+            status = "[green]PASS[/green]" if coverage_percent >= coverage_threshold else "[red]FAIL[/red]"
+            console.print(Panel(
+                f"Code Coverage: {coverage_percent:.1f}% (threshold: {coverage_threshold}%) {status}",
+                title="Coverage Report",
+                border_style="blue",
+            ))
+
     if output:
         reporter.generate_markdown(report, output)
         console.print(f"\n[green]Report saved to {output}[/green]")
 
-    # Exit code
+    # Exit codes
     if report.failing > 0:
         raise typer.Exit(code=1)
     if fail_on_missing and report.missing > 0:
         raise typer.Exit(code=2)
+    if coverage and coverage_percent is not None and coverage_percent < coverage_threshold:
+        raise typer.Exit(code=3)
+
+
+def _run_coverage(tests_dir: Path, source_dir: Optional[Path], verbose: bool) -> Optional[float]:
+    """Run pytest with coverage and return coverage percentage."""
+    cmd = [
+        sys.executable, "-m", "pytest",
+        str(tests_dir),
+        "--cov-report=term-missing",
+        "--cov-report=json:.coverage.json",
+    ]
+
+    if source_dir:
+        cmd.append(f"--cov={source_dir}")
+    else:
+        # Try to auto-detect source directory
+        for candidate in ["src", "."]:
+            if Path(candidate).exists():
+                cmd.append(f"--cov={candidate}")
+                break
+
+    if not verbose:
+        cmd.append("-q")
+
+    try:
+        result = subprocess.run(cmd, capture_output=not verbose, text=True)
+
+        # Parse coverage from JSON report
+        import json
+        coverage_file = Path(".coverage.json")
+        if coverage_file.exists():
+            with open(coverage_file) as f:
+                data = json.load(f)
+                return data.get("totals", {}).get("percent_covered", 0)
+    except Exception as e:
+        if verbose:
+            console.print(f"[yellow]Coverage analysis failed: {e}[/yellow]")
+
+    return None
 
 
 @app.command()
@@ -207,26 +279,45 @@ def _install_skills(path: Path) -> list[str]:
     skills_dir = path / ".claude" / "skills"
     installed = []
 
+    # Try to find skills in package first, then fall back to project root (dev mode)
+    skills_sources = []
+
     try:
-        # Access the skills directory from the package
+        # Try package location first
         skills_pkg = resources.files("spec_test") / "skills"
+        if skills_pkg.is_dir():
+            skills_sources.append(("package", skills_pkg))
+    except (TypeError, AttributeError, FileNotFoundError):
+        pass
 
-        # Check if skills directory exists in the package
-        if not skills_pkg.is_dir():
-            return []
+    # Fall back to project root for development mode
+    # __file__ is src/spec_test/cli.py, so .parent.parent.parent gets to project root
+    dev_skills = Path(__file__).parent.parent.parent / "skills"
+    if dev_skills.exists() and dev_skills.is_dir():
+        skills_sources.append(("dev", dev_skills))
 
-        skills_dir.mkdir(parents=True, exist_ok=True)
+    if not skills_sources:
+        return []
 
-        # Copy each skill file
-        for skill_file in skills_pkg.iterdir():
+    skills_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use the first available source
+    source_type, source_path = skills_sources[0]
+
+    if source_type == "package":
+        # Use importlib.resources traversable
+        for skill_file in source_path.iterdir():
             if skill_file.is_file() and skill_file.name.endswith(".md"):
                 dest = skills_dir / skill_file.name
                 dest.write_text(skill_file.read_text())
                 installed.append(skill_file.name)
-
-    except (TypeError, AttributeError, FileNotFoundError):
-        # Skills package not available or not a directory
-        return []
+    else:
+        # Use regular Path for dev mode
+        for skill_file in source_path.iterdir():
+            if skill_file.is_file() and skill_file.name.endswith(".md"):
+                dest = skills_dir / skill_file.name
+                dest.write_text(skill_file.read_text())
+                installed.append(skill_file.name)
 
     return sorted(installed)
 

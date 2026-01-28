@@ -1,7 +1,7 @@
 """Decorators for linking tests to specifications."""
 
-import asyncio
 import functools
+import inspect
 from typing import Callable, Optional
 
 import pytest
@@ -52,7 +52,7 @@ def spec(
         marked = pytest.mark.spec_id(spec_id)(marked)
 
         # Create appropriate wrapper based on whether func is async
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
 
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
@@ -118,7 +118,7 @@ def specs(*spec_ids: str):
             marked = pytest.mark.spec_id(sid)(marked)
 
         # Create appropriate wrapper based on whether func is async
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
 
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
