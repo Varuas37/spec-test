@@ -9,6 +9,16 @@ from .contracts import (
     get_contract_registry,
 )
 from .decorators import get_spec_registry, spec, specs
+from .prover import (
+    ProofOutcome,
+    ProofResult,
+    ProvableInfo,
+    clear_provable_registry,
+    get_provable_for_spec,
+    get_provable_registry,
+    provable,
+    verify_function,
+)
 from .reporter import Reporter
 from .types import (
     RelatedIssue,
@@ -46,4 +56,13 @@ __all__ = [
     # Classes
     "SpecVerifier",
     "Reporter",
+    # Prover (Z3)
+    "provable",
+    "ProofResult",
+    "ProofOutcome",
+    "ProvableInfo",
+    "verify_function",
+    "get_provable_registry",
+    "get_provable_for_spec",
+    "clear_provable_registry",
 ]

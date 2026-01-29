@@ -94,27 +94,67 @@ spec-test list-specs
 
 **Skill**: `spec-implement`
 
-Write code that satisfies the specs:
+Write code that satisfies the specs using **Functional Core, Imperative Shell**:
 
-1. **Add contracts** for runtime verification:
+1. **Structure code as pure functions** (functional core):
+```python
+# Pure function - no side effects, easy to test and prove
+def calculate_total(items: list[Item]) -> Decimal:
+    return sum(item.price * item.quantity for item in items)
+```
+
+2. **Add contracts** for runtime verification:
 ```python
 @contract(
     spec="FEAT-001",
-    requires=[...],
-    ensures=[...],
+    requires=[lambda items: len(items) > 0],
+    ensures=[lambda result: result >= 0],
 )
-def feature_function():
-    ...
+def calculate_total(items: list[Item]) -> Decimal:
+    return sum(item.price * item.quantity for item in items)
 ```
 
-2. **Write tests** linked to specs:
+3. **Push side effects to the edges** (imperative shell) with **Dependency Injection**:
 ```python
-@spec("FEAT-001", "Description")
-def test_feature():
-    ...
+class OrderService:
+    def __init__(self, db: Database, email: EmailSender):  # DI
+        self.db = db
+        self.email = email
+
+    def create_order(self, item_ids: list[str]) -> Order:
+        items = self.db.get_items(item_ids)  # Injected dependency
+        total = calculate_total(items)        # Pure function
+        order = Order(items=items, total=total)
+        self.db.save(order)                   # Injected dependency
+        return order
 ```
 
-**Deliverable**: Implementation with contracts and tests
+4. **Write tests** linked to specs:
+```python
+# Unit test for pure function (no mocks needed)
+@spec("FEAT-001", "Total is sum of item prices")
+def test_calculate_total():
+    items = [Item(price=Decimal("10"), quantity=2)]
+    assert calculate_total(items) == Decimal("20")
+
+# Mock test for service wiring (inject mocks via DI)
+@spec("FEAT-002", "Order calls database save")
+def test_order_saves():
+    mock_db = MockDatabase()
+    service = OrderService(db=mock_db, email=MockEmailSender())
+    service.create_order(["item-1"])
+    assert len(mock_db.saved) == 1
+
+# Integration test for real I/O (fewer of these)
+@spec("FEAT-003", "Order persists to database")
+@pytest.mark.integration
+def test_order_persists():
+    service = OrderService(db=real_db, email=real_email)
+    order = service.create_order(["item-1"])
+    assert real_db.get(order.id) is not None
+```
+
+**Deliverable**: Implementation with pure core, thin shell, contracts, and tests
 
 ### Step 4: Verify
 
@@ -187,6 +227,28 @@ tests/              # Step 3: Verification
 ### Orphan Specs
 ❌ Specs without tests
 ✅ Every spec ID has a `@spec` decorated test
+
+### Mixing Pure Logic with Side Effects
+❌ Business logic interleaved with database calls
+```python
+def process_order(order_id):
+    order = db.get(order_id)       # I/O
+    order.total = sum(...)          # Logic
+    db.save(order)                  # I/O
+    email.send(order.user)          # I/O
+```
+✅ Pure functions for logic, side effects at edges
+```python
+def calculate_total(items) -> Decimal:      # Pure
+    return sum(i.price * i.qty for i in items)
+
+class OrderService:                          # Shell
+    def process_order(self, order_id):
+        order = self.db.get(order_id)
+        order.total = calculate_total(order.items)
+        self.db.save(order)
+        self.email.send(order.user)
+```
 
 ## Example: Adding a Feature
 

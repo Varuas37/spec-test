@@ -11,6 +11,11 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .collector import collect_specs
+from .prover import (
+    ProofResult,
+    get_provable_registry,
+    verify_function,
+)
 from .reporter import Reporter
 from .verifier import SpecVerifier
 
@@ -68,6 +73,12 @@ def verify(
         "--coverage-threshold",
         help="Minimum coverage percentage required (default: 80)",
     ),
+    proofs: bool = typer.Option(
+        False,
+        "--proofs",
+        "-p",
+        help="Run Z3 formal proof verification on @provable functions",
+    ),
 ):
     """
     Verify all specifications have passing tests.
@@ -98,6 +109,12 @@ def verify(
                 border_style="blue",
             ))
 
+    # Run formal proof verification if requested
+    proof_failures = 0
+    if proofs:
+        proof_results = _run_proofs(verbose)
+        proof_failures = proof_results.get("refuted", 0)
+
     if output:
         reporter.generate_markdown(report, output)
         console.print(f"\n[green]Report saved to {output}[/green]")
@@ -109,6 +126,89 @@ def verify(
         raise typer.Exit(code=2)
     if coverage and coverage_percent is not None and coverage_percent < coverage_threshold:
         raise typer.Exit(code=3)
+    if proofs and proof_failures > 0:
+        raise typer.Exit(code=4)
+
+
+def _run_proofs(verbose: bool) -> dict[str, int]:
+    """Run Z3 formal proof verification on @provable functions.
+
+    Returns dict with counts: proven, refuted, unknown, skipped
+    """
+    registry = get_provable_registry()
+
+    if not registry:
+        if verbose:
+            console.print("[dim]No @provable functions registered[/dim]")
+        return {"proven": 0, "refuted": 0, "unknown": 0, "skipped": 0}
+
+    results = {"proven": 0, "refuted": 0, "unknown": 0, "skipped": 0}
+    outcomes = []
+
+    console.print(f"\n[bold]Running Z3 Proof Verification[/bold] ({len(registry)} functions)")
+    console.print()
+
+    for spec_id, info in registry.items():
+        # Try to get the actual function to verify
+        # We need to import the module and get the function
+        try:
+            import importlib
+            module = importlib.import_module(info.func_module)
+            func = getattr(module, info.func_name, None)
+
+            if func is None:
+                outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, "Function not found"))
+                results["skipped"] += 1
+                continue
+
+            outcome = verify_function(func)
+            outcomes.append((spec_id, info.func_name, outcome.result, outcome.message))
+
+            key = outcome.result.value
+            results[key] = results.get(key, 0) + 1
+
+            # Show counter-example if refuted
+            if outcome.result == ProofResult.REFUTED and outcome.counter_example:
+                if verbose:
+                    console.print(f"  Counter-example: {outcome.counter_example}")
+
+        except Exception as e:
+            outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, str(e)))
+            results["skipped"] += 1
+
+    # Display results
+    for spec_id, func_name, result, message in outcomes:
+        if result == ProofResult.PROVEN:
+            status = "[green]✓ PROVEN[/green]"
+        elif result == ProofResult.REFUTED:
+            status = "[red]✗ REFUTED[/red]"
+        elif result == ProofResult.UNKNOWN:
+            status = "[yellow]? UNKNOWN[/yellow]"
+        else:
+            status = "[dim]○ SKIPPED[/dim]"
+
+        console.print(f"  {status} {spec_id}: {func_name}")
+        if verbose and message:
+            console.print(f"    [dim]{message}[/dim]")
+
+    # Summary panel
+    total = sum(results.values())
+    summary = f"Proven: {results['proven']} | Refuted: {results['refuted']} | Unknown: {results['unknown']} | Skipped: {results['skipped']}"
+
+    if results["refuted"] > 0:
+        border_style = "red"
+    elif results["proven"] > 0 and results["unknown"] == 0:
+        border_style = "green"
+    else:
+        border_style = "yellow"
+
+    console.print(Panel(
+        summary,
+        title="Proof Verification Summary",
+        border_style=border_style,
+    ))
+
+    return results
 
 
 def _run_coverage(tests_dir: Path, source_dir: Optional[Path], verbose: bool) -> Optional[float]:
