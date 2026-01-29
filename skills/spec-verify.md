@@ -21,7 +21,7 @@ spec-test verify
 ```
 
 This command:
-1. Scans `docs/specs/spec-*.md` for specifications
+1. Scans `specs/*.md` for specifications
 2. Discovers tests with `@spec` decorators in `tests/`
 3. Runs matched tests
 4. Reports results
@@ -99,17 +99,16 @@ Based on the status, take appropriate action:
 **Symptom**: `spec-test check ID` returns "Spec not found"
 
 **Causes**:
-- Spec file not named `spec-*.md`
-- Spec not in `docs/specs/` directory
+- Spec file not in `specs/` directory
 - Spec format incorrect (missing `**ID**:`)
 
 **Solution**:
 ```bash
 # Check file naming
-ls docs/specs/
+ls specs/
 
 # Verify spec format in file
-grep -n "**AUTH-001**" docs/specs/spec-auth.md
+grep -n "**AUTH-001**" specs/auth.md
 ```
 
 ### Issue: Test Not Discovered
@@ -217,7 +216,7 @@ spec-test list-specs
 spec-test verify -o report.md
 
 # Custom directories
-spec-test verify -s docs/specs -t tests
+spec-test verify -s specs -t tests
 
 # Allow missing tests
 spec-test verify --no-fail-on-missing

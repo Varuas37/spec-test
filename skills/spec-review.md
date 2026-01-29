@@ -227,7 +227,7 @@ Use this checklist for each spec file:
 
 ### Organization
 - [ ] Specs are grouped logically
-- [ ] File naming follows spec-*.md pattern
+- [ ] File naming follows {domain}.md pattern in specs/
 - [ ] Specs are traceable to user stories/epics
 
 ## Feedback Template

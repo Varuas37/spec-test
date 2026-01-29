@@ -26,9 +26,9 @@ Ask clarifying questions if any of these are unclear.
 
 ### Step 2: Create or Update Spec File
 
-Specs live in `docs/specs/spec-*.md` files. Create a new file or add to an existing one.
+Specs live in `specs/*.md` files. Create a new file or add to an existing one.
 
-**File naming**: `spec-{domain}.md` (e.g., `spec-auth.md`, `spec-payments.md`)
+**File naming**: `{domain}.md` (e.g., `auth.md`, `payments.md`)
 
 ### Step 3: Write Specifications
 
@@ -150,7 +150,7 @@ Shopping cart allowing users to add, remove, and checkout items.
 spec-test list-specs
 
 # Check if your new specs are discovered
-spec-test list-specs --specs docs/specs
+spec-test list-specs --specs specs
 
 # Verify after writing tests
 spec-test verify
@@ -164,5 +164,5 @@ Before moving to implementation:
 - [ ] IDs follow PREFIX-NNN convention
 - [ ] Requirements are testable (clear pass/fail criteria)
 - [ ] Manual verification items are marked `[manual]`
-- [ ] Specs are saved in `docs/specs/spec-*.md`
+- [ ] Specs are saved in `specs/*.md`
 - [ ] Running `spec-test list-specs` shows new specs

@@ -223,7 +223,7 @@ This project uses `spec-test` for specification-driven development. Every behavi
 
 ## Workflow
 
-1. **Specs live in** `docs/specs/*.md`
+1. **Specs live in** `specs/*.md`
 2. **Tests use** `@spec("ID", "description")` decorator to link to specs
 3. **Run** `spec-test verify` to check all specs have passing tests
 
@@ -257,7 +257,7 @@ spec-test context         # Output this context for LLMs
 ## Rules
 
 1. Never claim a feature works without a test
-2. Every spec ID in docs/specs must have a corresponding `@spec` test
+2. Every spec ID in specs/ must have a corresponding `@spec` test
 3. Run `spec-test verify` before committing - it must pass
 4. If a spec has no test, write the test first
 """
@@ -331,18 +331,17 @@ def init(
 ):
     """Initialize spec-test in a project."""
     # Create specs directory
-    specs_dir = path / "docs" / "specs"
+    specs_dir = path / "specs"
     specs_dir.mkdir(parents=True, exist_ok=True)
     console.print(f"Created {specs_dir}/")
 
-    # Create example spec file (must match spec-*.md pattern)
-    example_spec = specs_dir / "spec-example.md"
+    # Create example spec file
+    example_spec = specs_dir / "example.md"
     if not example_spec.exists():
         example_spec.write_text("""# Example Specification
 
 ## Overview
 This is an example specification file. Replace with your actual specs.
-Spec files must be named spec-*.md to be discovered.
 
 ## Requirements
 
@@ -363,7 +362,7 @@ This project uses `spec-test` for specification-driven development. Every behavi
 
 ## Workflow
 
-1. **Specs live in** `docs/specs/*.md`
+1. **Specs live in** `specs/*.md`
 2. **Tests use** `@spec("ID", "description")` decorator to link to specs
 3. **Run** `spec-test verify` to check all specs have passing tests
 
@@ -397,7 +396,7 @@ spec-test context         # Output CLAUDE.md for LLM context
 ## Rules
 
 1. Never claim a feature works without a test
-2. Every spec ID in docs/specs must have a corresponding `@spec` test
+2. Every spec ID in specs/ must have a corresponding `@spec` test
 3. Run `spec-test verify` before committing - it must pass
 4. If a spec has no test, write the test first
 """)

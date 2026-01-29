@@ -49,20 +49,21 @@ def test_collector_extracts_verification_type():
         assert specs[1].verification_type == VerificationType.MANUAL
 
 
-@spec("COL-003", "Collector handles nested directories")
-def test_collector_handles_nested_directories():
-    """Test that collector finds spec-*.md files in nested directories."""
+@spec("COL-003", "Collector searches nested directories recursively within specs/")
+def test_collector_searches_nested_directories():
+    """Test that collector recursively searches subdirectories within specs/."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create nested structure
         nested = Path(tmpdir) / "subdir" / "deep"
         nested.mkdir(parents=True)
 
-        (Path(tmpdir) / "spec-root.md").write_text("- **ROOT-001**: Root spec")
-        (nested / "spec-nested.md").write_text("- **NEST-001**: Nested spec")
+        (Path(tmpdir) / "root.md").write_text("- **ROOT-001**: Root spec")
+        (nested / "nested.md").write_text("- **NEST-001**: Nested spec")
 
         specs = collect_specs(tmpdir)
 
         spec_ids = {s.id for s in specs}
+        # All specs within specs/ should be collected (recursive)
         assert "ROOT-001" in spec_ids
         assert "NEST-001" in spec_ids
 

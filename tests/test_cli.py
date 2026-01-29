@@ -92,15 +92,15 @@ def test_init_command():
 
         assert result.exit_code == 0
         assert "Created" in result.output
-        assert "docs/specs" in result.output
+        assert "specs" in result.output
         assert "CLAUDE.md" in result.output
 
         # Check directory was created
-        specs_dir = Path(tmpdir) / "docs" / "specs"
+        specs_dir = Path(tmpdir) / "specs"
         assert specs_dir.exists()
 
-        # Check example file was created (must match spec-*.md pattern)
-        example_file = specs_dir / "spec-example.md"
+        # Check example file was created
+        example_file = specs_dir / "example.md"
         assert example_file.exists()
 
         # Check CLAUDE.md was created
