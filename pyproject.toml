@@ -1,6 +1,6 @@
 [project]
 name = "spec-test"
-version = "0.2.0"
+version = "0.3.0"
 description = "Make AI-generated code trustworthy through mathematical verification"
 authors = [{ name = "Pulse Team" }]
 readme = "README.md"
