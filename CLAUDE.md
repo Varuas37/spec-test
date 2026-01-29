@@ -2,18 +2,27 @@
 
 ## Specification-Driven Development
 
-This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
+This project uses `spec-test` for specification-driven development.
 
 ## Workflow
 
-1. **Specs live in** `specs/*.md`
-2. **Tests use** `@spec("ID", "description")` decorator to link to specs
-3. **Run** `spec-test verify` to check all specs have passing tests
+1. **Issues** document intentions in `design/issues/`
+2. **Specs** define requirements in `design/specs/`
+3. **Tests** use `@spec("ID", "description")` decorator
+4. **Run** `spec-test verify` to check all specs have passing tests
+
+## Directory Structure
+
+```
+design/
+  issues/    # Why - intentions, pros/cons, context
+  specs/     # What - formal requirements
+  prompts/   # How - AI agent instructions
+```
 
 ## Spec Format
 
-In markdown files, specs are defined as:
-```
+```markdown
 - **PREFIX-001**: Description of requirement
 ```
 
@@ -24,7 +33,6 @@ from spec_test import spec
 
 @spec("PREFIX-001", "Description")
 def test_something():
-    # Test implementation
     assert result == expected
 ```
 
@@ -34,12 +42,11 @@ def test_something():
 spec-test verify          # Check all specs have passing tests
 spec-test list-specs      # List all specs
 spec-test check PREFIX-001  # Check single spec
-spec-test context         # Output CLAUDE.md for LLM context
 ```
 
 ## Rules
 
-1. Never claim a feature works without a test
-2. Every spec ID in specs/ must have a corresponding `@spec` test
-3. Run `spec-test verify` before committing - it must pass
-4. If a spec has no test, write the test first
+1. Write an issue before writing specs
+2. Every spec must link to an issue
+3. Every spec ID must have a corresponding `@spec` test
+4. Run `spec-test verify` before committing

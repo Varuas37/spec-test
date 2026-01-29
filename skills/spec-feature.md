@@ -26,7 +26,7 @@ Ask clarifying questions if any of these are unclear.
 
 ### Step 2: Create or Update Spec File
 
-Specs live in `specs/*.md` files. Create a new file or add to an existing one.
+Specs live in `design/specs/*.md` files. Create a new file or add to an existing one.
 
 **File naming**: `{domain}.md` (e.g., `auth.md`, `payments.md`)
 
@@ -164,5 +164,5 @@ Before moving to implementation:
 - [ ] IDs follow PREFIX-NNN convention
 - [ ] Requirements are testable (clear pass/fail criteria)
 - [ ] Manual verification items are marked `[manual]`
-- [ ] Specs are saved in `specs/*.md`
+- [ ] Specs are saved in `design/specs/*.md`
 - [ ] Running `spec-test list-specs` shows new specs

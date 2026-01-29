@@ -2,6 +2,9 @@
 
 Z3 integration enables formal verification of contracts using SMT solving, providing mathematical guarantees that code satisfies its specifications.
 
+## Related Issue
+- [ISSUE-004: Z3 Formal Proof Verification](../issues/004-z3-formal-proofs.md)
+
 ---
 
 ## Overview

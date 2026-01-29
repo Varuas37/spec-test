@@ -86,22 +86,28 @@ def test_check_command():
 
 @spec("CLI-004", "`init` command scaffolds project")
 def test_init_command():
-    """Test that init command creates spec directory structure."""
+    """Test that init command creates design directory structure."""
     with tempfile.TemporaryDirectory() as tmpdir:
         result = runner.invoke(app, ["init", tmpdir])
 
         assert result.exit_code == 0
         assert "Created" in result.output
-        assert "specs" in result.output
+        assert "design" in result.output
         assert "CLAUDE.md" in result.output
 
-        # Check directory was created
-        specs_dir = Path(tmpdir) / "specs"
-        assert specs_dir.exists()
+        # Check design directories were created
+        design_dir = Path(tmpdir) / "design"
+        assert design_dir.exists()
+        assert (design_dir / "specs").exists()
+        assert (design_dir / "issues").exists()
+        assert (design_dir / "prompts").exists()
 
-        # Check example file was created
-        example_file = specs_dir / "example.md"
-        assert example_file.exists()
+        # Check example files were created
+        example_spec = design_dir / "specs" / "example.md"
+        assert example_spec.exists()
+
+        example_issue = design_dir / "issues" / "001-example.md"
+        assert example_issue.exists()
 
         # Check CLAUDE.md was created
         claude_file = Path(tmpdir) / "CLAUDE.md"

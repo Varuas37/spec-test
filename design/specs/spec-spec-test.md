@@ -3,6 +3,9 @@
 ## Overview
 spec-test is a tool for specification-driven development that links requirements to tests.
 
+## Related Issue
+- [ISSUE-001: Core Spec-Test Functionality](../issues/001-core-spec-test.md)
+
 ## Decorator Requirements
 
 ### @spec Decorator

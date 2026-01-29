@@ -2,6 +2,9 @@
 
 Property-based testing using Hypothesis to automatically generate test cases and verify behavior across a wide range of inputs.
 
+## Related Issue
+- [ISSUE-003: Hypothesis Property Testing Integration](../issues/003-hypothesis-integration.md)
+
 ---
 
 ## Property Test Decorator

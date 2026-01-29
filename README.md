@@ -432,7 +432,6 @@ The math is simple:
 - [x] Spec-to-test linking with `@spec` decorator
 - [x] Runtime contracts with `@contract` (requires/ensures/invariants)
 - [x] `old()` support for comparing pre/post state in postconditions
-- [ ] Formal `Spec` class with string-based contracts
 - [ ] Hypothesis property testing integration
 - [ ] Z3 formal proof verification
 

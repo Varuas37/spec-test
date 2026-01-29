@@ -24,7 +24,7 @@ console = Console()
 @app.command()
 def verify(
     specs_dir: Path = typer.Option(
-        Path("specs"),
+        Path("design/specs"),
         "--specs",
         "-s",
         help="Directory containing spec markdown files",
@@ -152,7 +152,7 @@ def _run_coverage(tests_dir: Path, source_dir: Optional[Path], verbose: bool) ->
 @app.command()
 def list_specs(
     specs_dir: Path = typer.Option(
-        Path("specs"),
+        Path("design/specs"),
         "--specs",
         "-s",
         help="Directory containing spec markdown files",
@@ -176,7 +176,7 @@ def list_specs(
 @app.command()
 def check(
     spec_id: str = typer.Argument(..., help="Spec ID to check (e.g., AUTH-001)"),
-    specs_dir: Path = typer.Option(Path("specs"), "--specs", "-s"),
+    specs_dir: Path = typer.Option(Path("design/specs"), "--specs", "-s"),
     tests_dir: Path = typer.Option(Path("tests"), "--tests", "-t"),
 ):
     """Check a single specification."""
@@ -219,18 +219,27 @@ def context(
 
 ## Specification-Driven Development
 
-This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
+This project uses `spec-test` for specification-driven development.
 
 ## Workflow
 
-1. **Specs live in** `specs/*.md`
-2. **Tests use** `@spec("ID", "description")` decorator to link to specs
-3. **Run** `spec-test verify` to check all specs have passing tests
+1. **Issues** document intentions in `design/issues/`
+2. **Specs** define requirements in `design/specs/`
+3. **Tests** use `@spec("ID", "description")` decorator
+4. **Run** `spec-test verify` to check all specs have passing tests
+
+## Directory Structure
+
+```
+design/
+  issues/    # Why - intentions, pros/cons, context
+  specs/     # What - formal requirements
+  prompts/   # How - AI agent instructions
+```
 
 ## Spec Format
 
-In markdown files, specs are defined as:
-```
+```markdown
 - **PREFIX-001**: Description of requirement
 ```
 
@@ -241,7 +250,6 @@ from spec_test import spec
 
 @spec("PREFIX-001", "Description")
 def test_something():
-    # Test implementation
     assert result == expected
 ```
 
@@ -251,15 +259,14 @@ def test_something():
 spec-test verify          # Check all specs have passing tests
 spec-test list-specs      # List all specs
 spec-test check PREFIX-001  # Check single spec
-spec-test context         # Output this context for LLMs
 ```
 
 ## Rules
 
-1. Never claim a feature works without a test
-2. Every spec ID in specs/ must have a corresponding `@spec` test
-3. Run `spec-test verify` before committing - it must pass
-4. If a spec has no test, write the test first
+1. Write an issue before writing specs
+2. Every spec must link to an issue
+3. Every spec ID must have a corresponding `@spec` test
+4. Run `spec-test verify` before committing
 """
         console.print(
             "[yellow]No CLAUDE.md found. Here's the default spec-test context:[/yellow]\n"
@@ -330,10 +337,15 @@ def init(
     ),
 ):
     """Initialize spec-test in a project."""
-    # Create specs directory
-    specs_dir = path / "specs"
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    console.print(f"Created {specs_dir}/")
+    # Create design directory structure
+    design_dir = path / "design"
+    specs_dir = design_dir / "specs"
+    issues_dir = design_dir / "issues"
+    prompts_dir = design_dir / "prompts"
+
+    for d in [specs_dir, issues_dir, prompts_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+    console.print(f"Created {design_dir}/ (specs/, issues/, prompts/)")
 
     # Create example spec file
     example_spec = specs_dir / "example.md"
@@ -343,12 +355,46 @@ def init(
 ## Overview
 This is an example specification file. Replace with your actual specs.
 
+## Related Issue
+- [ISSUE-001](../issues/001-example.md)
+
 ## Requirements
 
 ### Core Features
 - **EXAMPLE-001**: The system should do something useful
 - **EXAMPLE-002**: The system should handle errors gracefully
 - **EXAMPLE-003** [manual]: Code follows project naming conventions
+""")
+
+    # Create example issue file
+    example_issue = issues_dir / "001-example.md"
+    if not example_issue.exists():
+        example_issue.write_text("""# ISSUE-001: Example Feature
+
+## Summary
+Brief description of what this feature/change is about.
+
+## Motivation
+Why are we doing this? What problem does it solve?
+
+## Detailed Description
+Full details of the intended behavior, edge cases, and considerations.
+
+## Pros
+- List benefits
+
+## Cons
+- List drawbacks or trade-offs
+
+## Related Specs
+- [EXAMPLE-001](../specs/example.md)
+- [EXAMPLE-002](../specs/example.md)
+
+## Status
+- [ ] Issue written
+- [ ] Specs defined
+- [ ] Implementation complete
+- [ ] Tests passing
 """)
 
     # Create CLAUDE.md with spec-test instructions
@@ -358,18 +404,27 @@ This is an example specification file. Replace with your actual specs.
 
 ## Specification-Driven Development
 
-This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
+This project uses `spec-test` for specification-driven development.
 
 ## Workflow
 
-1. **Specs live in** `specs/*.md`
-2. **Tests use** `@spec("ID", "description")` decorator to link to specs
-3. **Run** `spec-test verify` to check all specs have passing tests
+1. **Issues** document intentions in `design/issues/`
+2. **Specs** define requirements in `design/specs/`
+3. **Tests** use `@spec("ID", "description")` decorator
+4. **Run** `spec-test verify` to check all specs have passing tests
+
+## Directory Structure
+
+```
+design/
+  issues/    # Why - intentions, pros/cons, context
+  specs/     # What - formal requirements
+  prompts/   # How - AI agent instructions
+```
 
 ## Spec Format
 
-In markdown files, specs are defined as:
-```
+```markdown
 - **PREFIX-001**: Description of requirement
 ```
 
@@ -380,7 +435,6 @@ from spec_test import spec
 
 @spec("PREFIX-001", "Description")
 def test_something():
-    # Test implementation
     assert result == expected
 ```
 
@@ -390,15 +444,14 @@ def test_something():
 spec-test verify          # Check all specs have passing tests
 spec-test list-specs      # List all specs
 spec-test check PREFIX-001  # Check single spec
-spec-test context         # Output CLAUDE.md for LLM context
 ```
 
 ## Rules
 
-1. Never claim a feature works without a test
-2. Every spec ID in specs/ must have a corresponding `@spec` test
-3. Run `spec-test verify` before committing - it must pass
-4. If a spec has no test, write the test first
+1. Write an issue before writing specs
+2. Every spec must link to an issue
+3. Every spec ID must have a corresponding `@spec` test
+4. Run `spec-test verify` before committing
 """)
         console.print("Created CLAUDE.md")
 

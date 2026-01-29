@@ -2,6 +2,9 @@
 
 Contracts enforce preconditions and postconditions at runtime.
 
+## Related Issue
+- [ISSUE-002: Runtime Contract Enforcement](../issues/002-runtime-contracts.md)
+
 ---
 
 ## Contract Decorator
