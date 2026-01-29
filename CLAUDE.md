@@ -2,7 +2,7 @@
 
 ## Specification-Driven Development
 
-This project uses `spec-test` for specification-driven development.
+This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
 
 ## Workflow
 
@@ -44,9 +44,28 @@ spec-test list-specs      # List all specs
 spec-test check PREFIX-001  # Check single spec
 ```
 
+## Architecture
+
+Follow **Functional Core, Imperative Shell** with **Dependency Injection**:
+
+- **Pure functions** for all business logic (testable, provable with Z3)
+- **Dependency Injection** for I/O dependencies (testable with mocks)
+- **Integration tests** only for verifying real I/O works
+
+```
+┌─────────────────────────────────────────┐
+│          Imperative Shell               │  ← I/O via DI
+│  ┌───────────────────────────────────┐  │
+│  │       Functional Core             │  │  ← Pure functions
+│  │    (all business logic here)      │  │
+│  └───────────────────────────────────┘  │
+└─────────────────────────────────────────┘
+```
+
 ## Rules
 
 1. Write an issue before writing specs
 2. Every spec must link to an issue
 3. Every spec ID must have a corresponding `@spec` test
 4. Run `spec-test verify` before committing
+5. Prefer pure functions; push side effects to the edges
