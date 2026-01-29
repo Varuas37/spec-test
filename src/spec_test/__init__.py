@@ -3,6 +3,7 @@
 from .contracts import (
     ContractError,
     ContractInfo,
+    Old,
     contract,
     get_contract_for_spec,
     get_contract_registry,
@@ -30,6 +31,7 @@ __all__ = [
     "contract",
     "ContractError",
     "ContractInfo",
+    "Old",
     "get_contract_registry",
     "get_contract_for_spec",
     # Types
