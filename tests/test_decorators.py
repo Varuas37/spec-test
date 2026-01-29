@@ -1,5 +1,7 @@
 """Tests for the @spec decorator."""
 
+import inspect
+
 import pytest
 
 from spec_test import get_spec_registry, spec, specs
@@ -84,7 +86,7 @@ async def test_spec_decorator_preserves_async():
         return "async_result"
 
     # Verify the wrapper is still a coroutine function
-    assert asyncio.iscoroutinefunction(async_sample_test)
+    assert inspect.iscoroutinefunction(async_sample_test)
 
     # Verify it can be awaited and returns correct result
     result = await async_sample_test()
@@ -107,7 +109,7 @@ async def test_spec_decorator_order_independence():
         await asyncio.sleep(0.001)
         return "result"
 
-    assert asyncio.iscoroutinefunction(async_test_spec_below)
+    assert inspect.iscoroutinefunction(async_test_spec_below)
     result = await async_test_spec_below()
     assert result == "result"
 
@@ -124,7 +126,7 @@ async def test_specs_decorator_preserves_async():
         return "multi_async_result"
 
     # Verify the wrapper is still a coroutine function
-    assert asyncio.iscoroutinefunction(async_multi_spec_test)
+    assert inspect.iscoroutinefunction(async_multi_spec_test)
 
     # Verify it can be awaited and returns correct result
     result = await async_multi_spec_test()

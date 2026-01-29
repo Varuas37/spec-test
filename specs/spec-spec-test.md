@@ -17,10 +17,10 @@ spec-test is a tool for specification-driven development that links requirements
 ## Collector Requirements
 
 ### Spec Parsing
-- **COL-001**: Collector finds specs in spec-*.md files with **ID**: format
+- **COL-001**: Collector finds specs in all .md files with **ID**: format
 - **COL-002**: Collector extracts verification type from [brackets]
-- **COL-003**: Collector handles nested directories
-- **COL-004**: Collector only processes files matching spec-*.md pattern
+- **COL-003**: Collector searches nested directories recursively within specs/
+- **COL-004**: Collector skips files starting with underscore
 
 ## Runner Requirements
 

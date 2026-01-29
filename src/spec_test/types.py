@@ -18,6 +18,7 @@ class VerificationType(Enum):
     """How a spec should be verified."""
     TEST = "test"                # Standard pytest test
     MANUAL = "manual"            # Requires human verification
+    SKIP = "skip"                # Skipped - not implemented yet
 
 
 @dataclass
@@ -60,12 +61,14 @@ class VerificationReport:
     passing: int = 0
     failing: int = 0
     missing: int = 0
+    skipped: int = 0
 
     def __post_init__(self):
         self.total_specs = len(self.results)
         self.passing = sum(1 for r in self.results if r.status == SpecStatus.PASSING)
         self.failing = sum(1 for r in self.results if r.status == SpecStatus.FAILING)
         self.missing = sum(1 for r in self.results if r.status == SpecStatus.PENDING)
+        self.skipped = sum(1 for r in self.results if r.status == SpecStatus.SKIPPED)
 
     @property
     def coverage_percent(self) -> float:

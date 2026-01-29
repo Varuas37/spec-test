@@ -1,13 +1,14 @@
 [project]
 name = "spec-test"
-version = "0.1.4"
-description = "Specification-driven development tool with test verification"
+version = "0.2.0"
+description = "Make AI-generated code trustworthy through mathematical verification"
 authors = [{ name = "Pulse Team" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
     "rich>=13.0.0",
     "typer>=0.9.0",
     "pydantic>=2.0.0",
@@ -30,11 +31,7 @@ spec_test = "spec_test.pytest_plugin"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["spec_test"]
-
-[tool.hatch.build]
-sources = ["src"]
+# hatchling will auto-discover src/spec_test
 
 [tool.ruff]
 line-length = 100

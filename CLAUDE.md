@@ -6,7 +6,7 @@ This project uses `spec-test` for specification-driven development. Every behavi
 
 ## Workflow
 
-1. **Specs live in** `docs/specs/*.md`
+1. **Specs live in** `specs/*.md`
 2. **Tests use** `@spec("ID", "description")` decorator to link to specs
 3. **Run** `spec-test verify` to check all specs have passing tests
 
@@ -40,6 +40,6 @@ spec-test context         # Output CLAUDE.md for LLM context
 ## Rules
 
 1. Never claim a feature works without a test
-2. Every spec ID in docs/specs must have a corresponding `@spec` test
+2. Every spec ID in specs/ must have a corresponding `@spec` test
 3. Run `spec-test verify` before committing - it must pass
 4. If a spec has no test, write the test first

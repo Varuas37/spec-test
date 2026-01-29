@@ -10,11 +10,11 @@ from spec_test.collector import _parse_spec_file, collect_specs
 from spec_test.types import VerificationType
 
 
-@spec("COL-001", "Collector finds specs in spec-*.md files with **ID**: format")
+@spec("COL-001", "Collector finds specs in all .md files with **ID**: format")
 def test_collector_finds_specs_in_markdown():
-    """Test that collector parses **ID**: format from spec-*.md files."""
+    """Test that collector parses **ID**: format from all .md files."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        spec_file = Path(tmpdir) / "spec-test.md"
+        spec_file = Path(tmpdir) / "feature.md"
         spec_file.write_text("""# Test Spec
 
 ## Requirements
@@ -49,41 +49,42 @@ def test_collector_extracts_verification_type():
         assert specs[1].verification_type == VerificationType.MANUAL
 
 
-@spec("COL-003", "Collector handles nested directories")
-def test_collector_handles_nested_directories():
-    """Test that collector finds spec-*.md files in nested directories."""
+@spec("COL-003", "Collector searches nested directories recursively within specs/")
+def test_collector_searches_nested_directories():
+    """Test that collector recursively searches subdirectories within specs/."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create nested structure
         nested = Path(tmpdir) / "subdir" / "deep"
         nested.mkdir(parents=True)
 
-        (Path(tmpdir) / "spec-root.md").write_text("- **ROOT-001**: Root spec")
-        (nested / "spec-nested.md").write_text("- **NEST-001**: Nested spec")
+        (Path(tmpdir) / "root.md").write_text("- **ROOT-001**: Root spec")
+        (nested / "nested.md").write_text("- **NEST-001**: Nested spec")
 
         specs = collect_specs(tmpdir)
 
         spec_ids = {s.id for s in specs}
+        # All specs within specs/ should be collected (recursive)
         assert "ROOT-001" in spec_ids
         assert "NEST-001" in spec_ids
 
 
-@spec("COL-004", "Collector only processes files matching spec-*.md pattern")
-def test_collector_ignores_non_spec_files():
-    """Test that collector ignores files not matching spec-*.md pattern."""
+@spec("COL-004", "Collector skips files starting with underscore")
+def test_collector_skips_underscore_files():
+    """Test that collector ignores files starting with underscore."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Create spec file (should be collected)
-        (Path(tmpdir) / "spec-auth.md").write_text("- **AUTH-001**: Auth spec")
+        # Create regular files (should be collected)
+        (Path(tmpdir) / "auth.md").write_text("- **AUTH-001**: Auth spec")
+        (Path(tmpdir) / "feature.md").write_text("- **FEAT-001**: Feature spec")
 
-        # Create non-spec files (should be ignored)
-        (Path(tmpdir) / "README.md").write_text("- **README-001**: Should be ignored")
-        (Path(tmpdir) / "notes.md").write_text("- **NOTES-001**: Should be ignored")
-        (Path(tmpdir) / "specification.md").write_text("- **SPEC-001**: Should be ignored")
+        # Create underscore files (should be ignored)
+        (Path(tmpdir) / "_index.md").write_text("- **INDEX-001**: Should be ignored")
+        (Path(tmpdir) / "_internal.md").write_text("- **INT-001**: Should be ignored")
 
         specs = collect_specs(tmpdir)
 
         spec_ids = {s.id for s in specs}
         assert "AUTH-001" in spec_ids
-        assert "README-001" not in spec_ids
-        assert "NOTES-001" not in spec_ids
-        assert "SPEC-001" not in spec_ids
-        assert len(specs) == 1
+        assert "FEAT-001" in spec_ids
+        assert "INDEX-001" not in spec_ids
+        assert "INT-001" not in spec_ids
+        assert len(specs) == 2

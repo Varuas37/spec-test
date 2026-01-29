@@ -8,21 +8,25 @@ from .types import SpecRequirement, VerificationType
 
 # Pattern: **SPEC-001**: Description
 # Or: - **SPEC-001**: Description
-# Or with verification type: **SPEC-001** [manual]: Description
+# Or with tags: **SPEC-001** [SKIP]: Description
+# Or with multiple tags: **SPEC-001** [manual] [SKIP]: Description
 SPEC_PATTERN = re.compile(
     r"\*\*([A-Z]+-\d+)\*\*"  # **SPEC-001**
-    r"(?:\s*\[(\w+)\])?"  # Optional [verification_type]
+    r"((?:\s*\[\w+\])*)"  # Optional tags like [manual] [SKIP]
     r":\s*(.+?)$",  # : Description
     re.MULTILINE,
 )
 
+# Pattern to extract individual tags
+TAG_PATTERN = re.compile(r"\[(\w+)\]")
+
 
 def collect_specs(specs_dir: str | Path) -> list[SpecRequirement]:
     """
-    Collect all specification requirements from spec-*.md files.
+    Collect all specification requirements from markdown files.
 
     Args:
-        specs_dir: Directory to search for spec-*.md files (searches recursively)
+        specs_dir: Directory to search for .md files (recursive within specs/)
 
     Returns:
         List of SpecRequirement objects
@@ -32,8 +36,11 @@ def collect_specs(specs_dir: str | Path) -> list[SpecRequirement]:
         return []
 
     specs = []
-    # Only collect from files matching spec-*.md pattern
-    for md_file in specs_path.glob("**/spec-*.md"):
+    # Collect from all .md files in specs directory (recursive)
+    for md_file in specs_path.glob("**/*.md"):
+        # Skip files starting with underscore (like _index.md for internal use)
+        if md_file.name.startswith("_"):
+            continue
         specs.extend(_parse_spec_file(md_file))
 
     return specs
@@ -50,15 +57,18 @@ def _parse_spec_file(file_path: Path) -> Iterator[SpecRequirement]:
             continue
 
         spec_id = match.group(1)
-        verification_type_str = match.group(2)
+        tags_str = match.group(2)
         description = match.group(3).strip()
 
-        # Determine verification type
-        if verification_type_str:
-            try:
-                verification_type = VerificationType(verification_type_str.lower())
-            except ValueError:
-                verification_type = VerificationType.TEST
+        # Parse tags
+        tags = TAG_PATTERN.findall(tags_str) if tags_str else []
+        tags_lower = [t.lower() for t in tags]
+
+        # Determine verification type (priority: skip > manual > test)
+        if "skip" in tags_lower:
+            verification_type = VerificationType.SKIP
+        elif "manual" in tags_lower:
+            verification_type = VerificationType.MANUAL
         else:
             verification_type = VerificationType.TEST
 
