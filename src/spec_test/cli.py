@@ -11,6 +11,11 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .collector import collect_specs
+from .prover import (
+    ProofResult,
+    get_provable_registry,
+    verify_function,
+)
 from .reporter import Reporter
 from .verifier import SpecVerifier
 
@@ -24,7 +29,7 @@ console = Console()
 @app.command()
 def verify(
     specs_dir: Path = typer.Option(
-        Path("specs"),
+        Path("design/specs"),
         "--specs",
         "-s",
         help="Directory containing spec markdown files",
@@ -68,6 +73,12 @@ def verify(
         "--coverage-threshold",
         help="Minimum coverage percentage required (default: 80)",
     ),
+    proofs: bool = typer.Option(
+        False,
+        "--proofs",
+        "-p",
+        help="Run Z3 formal proof verification on @provable functions",
+    ),
 ):
     """
     Verify all specifications have passing tests.
@@ -98,6 +109,12 @@ def verify(
                 border_style="blue",
             ))
 
+    # Run formal proof verification if requested
+    proof_failures = 0
+    if proofs:
+        proof_results = _run_proofs(verbose)
+        proof_failures = proof_results.get("refuted", 0)
+
     if output:
         reporter.generate_markdown(report, output)
         console.print(f"\n[green]Report saved to {output}[/green]")
@@ -109,6 +126,89 @@ def verify(
         raise typer.Exit(code=2)
     if coverage and coverage_percent is not None and coverage_percent < coverage_threshold:
         raise typer.Exit(code=3)
+    if proofs and proof_failures > 0:
+        raise typer.Exit(code=4)
+
+
+def _run_proofs(verbose: bool) -> dict[str, int]:
+    """Run Z3 formal proof verification on @provable functions.
+
+    Returns dict with counts: proven, refuted, unknown, skipped
+    """
+    registry = get_provable_registry()
+
+    if not registry:
+        if verbose:
+            console.print("[dim]No @provable functions registered[/dim]")
+        return {"proven": 0, "refuted": 0, "unknown": 0, "skipped": 0}
+
+    results = {"proven": 0, "refuted": 0, "unknown": 0, "skipped": 0}
+    outcomes = []
+
+    console.print(f"\n[bold]Running Z3 Proof Verification[/bold] ({len(registry)} functions)")
+    console.print()
+
+    for spec_id, info in registry.items():
+        # Try to get the actual function to verify
+        # We need to import the module and get the function
+        try:
+            import importlib
+            module = importlib.import_module(info.func_module)
+            func = getattr(module, info.func_name, None)
+
+            if func is None:
+                outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, "Function not found"))
+                results["skipped"] += 1
+                continue
+
+            outcome = verify_function(func)
+            outcomes.append((spec_id, info.func_name, outcome.result, outcome.message))
+
+            key = outcome.result.value
+            results[key] = results.get(key, 0) + 1
+
+            # Show counter-example if refuted
+            if outcome.result == ProofResult.REFUTED and outcome.counter_example:
+                if verbose:
+                    console.print(f"  Counter-example: {outcome.counter_example}")
+
+        except Exception as e:
+            outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, str(e)))
+            results["skipped"] += 1
+
+    # Display results
+    for spec_id, func_name, result, message in outcomes:
+        if result == ProofResult.PROVEN:
+            status = "[green]✓ PROVEN[/green]"
+        elif result == ProofResult.REFUTED:
+            status = "[red]✗ REFUTED[/red]"
+        elif result == ProofResult.UNKNOWN:
+            status = "[yellow]? UNKNOWN[/yellow]"
+        else:
+            status = "[dim]○ SKIPPED[/dim]"
+
+        console.print(f"  {status} {spec_id}: {func_name}")
+        if verbose and message:
+            console.print(f"    [dim]{message}[/dim]")
+
+    # Summary panel
+    total = sum(results.values())
+    summary = f"Proven: {results['proven']} | Refuted: {results['refuted']} | Unknown: {results['unknown']} | Skipped: {results['skipped']}"
+
+    if results["refuted"] > 0:
+        border_style = "red"
+    elif results["proven"] > 0 and results["unknown"] == 0:
+        border_style = "green"
+    else:
+        border_style = "yellow"
+
+    console.print(Panel(
+        summary,
+        title="Proof Verification Summary",
+        border_style=border_style,
+    ))
+
+    return results
 
 
 def _run_coverage(tests_dir: Path, source_dir: Optional[Path], verbose: bool) -> Optional[float]:
@@ -152,10 +252,16 @@ def _run_coverage(tests_dir: Path, source_dir: Optional[Path], verbose: bool) ->
 @app.command()
 def list_specs(
     specs_dir: Path = typer.Option(
-        Path("specs"),
+        Path("design/specs"),
         "--specs",
         "-s",
         help="Directory containing spec markdown files",
+    ),
+    show_issues: bool = typer.Option(
+        False,
+        "--show-issues",
+        "-i",
+        help="Show related issue status for each spec",
     ),
 ):
     """List all specifications found in spec files."""
@@ -165,18 +271,39 @@ def list_specs(
         console.print("[yellow]No specifications found[/yellow]")
         raise typer.Exit(code=0)
 
-    console.print(f"\n[bold]Found {len(specs)} specifications:[/bold]\n")
+    # Count specs with/without issues
+    with_issues = sum(1 for s in specs if s.has_issue)
+    without_issues = len(specs) - with_issues
+
+    console.print(f"\n[bold]Found {len(specs)} specifications:[/bold]")
+    if show_issues:
+        issue_status = f"[green]{with_issues} with issues[/green]"
+        if without_issues > 0:
+            issue_status += f", [yellow]{without_issues} missing issues[/yellow]"
+        console.print(f"  {issue_status}\n")
+    else:
+        console.print()
 
     for spec in sorted(specs, key=lambda s: s.id):
         console.print(f"  [cyan]{spec.id}[/cyan]: {spec.description}")
         console.print(f"    [dim]{spec.source_file}:{spec.source_line}[/dim]")
+
+        if show_issues:
+            if spec.has_issue:
+                for issue in spec.related_issues:
+                    exists = Path(issue.path).exists()
+                    status = "[green]✓[/green]" if exists else "[red]✗ not found[/red]"
+                    console.print(f"    Issue: {status} {issue.title}")
+            else:
+                console.print(f"    Issue: [yellow]⚠ No related issue[/yellow]")
+
     console.print()
 
 
 @app.command()
 def check(
     spec_id: str = typer.Argument(..., help="Spec ID to check (e.g., AUTH-001)"),
-    specs_dir: Path = typer.Option(Path("specs"), "--specs", "-s"),
+    specs_dir: Path = typer.Option(Path("design/specs"), "--specs", "-s"),
     tests_dir: Path = typer.Option(Path("tests"), "--tests", "-t"),
 ):
     """Check a single specification."""
@@ -219,18 +346,27 @@ def context(
 
 ## Specification-Driven Development
 
-This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
+This project uses `spec-test` for specification-driven development.
 
 ## Workflow
 
-1. **Specs live in** `specs/*.md`
-2. **Tests use** `@spec("ID", "description")` decorator to link to specs
-3. **Run** `spec-test verify` to check all specs have passing tests
+1. **Issues** document intentions in `design/issues/`
+2. **Specs** define requirements in `design/specs/`
+3. **Tests** use `@spec("ID", "description")` decorator
+4. **Run** `spec-test verify` to check all specs have passing tests
+
+## Directory Structure
+
+```
+design/
+  issues/    # Why - intentions, pros/cons, context
+  specs/     # What - formal requirements
+  prompts/   # How - AI agent instructions
+```
 
 ## Spec Format
 
-In markdown files, specs are defined as:
-```
+```markdown
 - **PREFIX-001**: Description of requirement
 ```
 
@@ -241,7 +377,6 @@ from spec_test import spec
 
 @spec("PREFIX-001", "Description")
 def test_something():
-    # Test implementation
     assert result == expected
 ```
 
@@ -251,15 +386,14 @@ def test_something():
 spec-test verify          # Check all specs have passing tests
 spec-test list-specs      # List all specs
 spec-test check PREFIX-001  # Check single spec
-spec-test context         # Output this context for LLMs
 ```
 
 ## Rules
 
-1. Never claim a feature works without a test
-2. Every spec ID in specs/ must have a corresponding `@spec` test
-3. Run `spec-test verify` before committing - it must pass
-4. If a spec has no test, write the test first
+1. Write an issue before writing specs
+2. Every spec must link to an issue
+3. Every spec ID must have a corresponding `@spec` test
+4. Run `spec-test verify` before committing
 """
         console.print(
             "[yellow]No CLAUDE.md found. Here's the default spec-test context:[/yellow]\n"
@@ -330,10 +464,15 @@ def init(
     ),
 ):
     """Initialize spec-test in a project."""
-    # Create specs directory
-    specs_dir = path / "specs"
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    console.print(f"Created {specs_dir}/")
+    # Create design directory structure
+    design_dir = path / "design"
+    specs_dir = design_dir / "specs"
+    issues_dir = design_dir / "issues"
+    prompts_dir = design_dir / "prompts"
+
+    for d in [specs_dir, issues_dir, prompts_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+    console.print(f"Created {design_dir}/ (specs/, issues/, prompts/)")
 
     # Create example spec file
     example_spec = specs_dir / "example.md"
@@ -343,12 +482,46 @@ def init(
 ## Overview
 This is an example specification file. Replace with your actual specs.
 
+## Related Issue
+- [ISSUE-001](../issues/001-example.md)
+
 ## Requirements
 
 ### Core Features
 - **EXAMPLE-001**: The system should do something useful
 - **EXAMPLE-002**: The system should handle errors gracefully
 - **EXAMPLE-003** [manual]: Code follows project naming conventions
+""")
+
+    # Create example issue file
+    example_issue = issues_dir / "001-example.md"
+    if not example_issue.exists():
+        example_issue.write_text("""# ISSUE-001: Example Feature
+
+## Summary
+Brief description of what this feature/change is about.
+
+## Motivation
+Why are we doing this? What problem does it solve?
+
+## Detailed Description
+Full details of the intended behavior, edge cases, and considerations.
+
+## Pros
+- List benefits
+
+## Cons
+- List drawbacks or trade-offs
+
+## Related Specs
+- [EXAMPLE-001](../specs/example.md)
+- [EXAMPLE-002](../specs/example.md)
+
+## Status
+- [ ] Issue written
+- [ ] Specs defined
+- [ ] Implementation complete
+- [ ] Tests passing
 """)
 
     # Create CLAUDE.md with spec-test instructions
@@ -358,18 +531,27 @@ This is an example specification file. Replace with your actual specs.
 
 ## Specification-Driven Development
 
-This project uses `spec-test` for specification-driven development. Every behavior must be backed by a passing test.
+This project uses `spec-test` for specification-driven development.
 
 ## Workflow
 
-1. **Specs live in** `specs/*.md`
-2. **Tests use** `@spec("ID", "description")` decorator to link to specs
-3. **Run** `spec-test verify` to check all specs have passing tests
+1. **Issues** document intentions in `design/issues/`
+2. **Specs** define requirements in `design/specs/`
+3. **Tests** use `@spec("ID", "description")` decorator
+4. **Run** `spec-test verify` to check all specs have passing tests
+
+## Directory Structure
+
+```
+design/
+  issues/    # Why - intentions, pros/cons, context
+  specs/     # What - formal requirements
+  prompts/   # How - AI agent instructions
+```
 
 ## Spec Format
 
-In markdown files, specs are defined as:
-```
+```markdown
 - **PREFIX-001**: Description of requirement
 ```
 
@@ -380,7 +562,6 @@ from spec_test import spec
 
 @spec("PREFIX-001", "Description")
 def test_something():
-    # Test implementation
     assert result == expected
 ```
 
@@ -390,15 +571,14 @@ def test_something():
 spec-test verify          # Check all specs have passing tests
 spec-test list-specs      # List all specs
 spec-test check PREFIX-001  # Check single spec
-spec-test context         # Output CLAUDE.md for LLM context
 ```
 
 ## Rules
 
-1. Never claim a feature works without a test
-2. Every spec ID in specs/ must have a corresponding `@spec` test
-3. Run `spec-test verify` before committing - it must pass
-4. If a spec has no test, write the test first
+1. Write an issue before writing specs
+2. Every spec must link to an issue
+3. Every spec ID must have a corresponding `@spec` test
+4. Run `spec-test verify` before committing
 """)
         console.print("Created CLAUDE.md")
 

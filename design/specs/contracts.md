@@ -2,6 +2,9 @@
 
 Contracts enforce preconditions and postconditions at runtime.
 
+## Related Issue
+- [ISSUE-002: Runtime Contract Enforcement](../issues/002-runtime-contracts.md)
+
 ---
 
 ## Contract Decorator
@@ -36,6 +39,18 @@ Contracts enforce preconditions and postconditions at runtime.
   - Requires: function is async
   - Ensures: awaitable behavior preserved, contracts checked
 
+- **CONTRACT-006**: @contract validates invariants before and after execution
+
+  **Contracts:**
+  - Requires: invariants is list of callables
+  - Ensures: each invariant checked before AND after function execution
+
+- **CONTRACT-007**: @contract supports old() for capturing pre-state
+
+  **Contracts:**
+  - Requires: capture_old=True
+  - Ensures: postconditions receive (result, old) where old has deep copies of args
+
 ---
 
 ## Contract Validation
@@ -55,6 +70,18 @@ Contracts enforce preconditions and postconditions at runtime.
 - **CONTRACT-012** [SKIP]: String preconditions evaluated as expressions
 
   Deferred - requires expression parsing.
+
+- **CONTRACT-013**: Callable invariants receive function arguments
+
+  **Contracts:**
+  - Requires: invariant is callable
+  - Ensures: called with (*args, **kwargs) of decorated function
+
+- **CONTRACT-014**: Old object provides access to captured argument values
+
+  **Contracts:**
+  - Requires: capture_old=True on contract
+  - Ensures: old.argname returns deep copy of original argument value
 
 ---
 

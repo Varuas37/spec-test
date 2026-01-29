@@ -2,7 +2,7 @@
 
 import pytest
 
-from spec_test import spec, contract, ContractError, get_contract_registry
+from spec_test import spec, contract, ContractError, get_contract_registry, Old
 from spec_test.contracts import clear_contract_registry
 
 
@@ -262,3 +262,155 @@ def test_report_contract_coverage():
 
         assert get_contract_for_spec("HASCON-001") is not None
         assert get_contract_for_spec("NOCON-001") is None
+
+
+@spec("CONTRACT-006", "@contract validates invariants before and after execution")
+def test_contract_validates_invariants():
+    """Test that @contract checks invariants before AND after function runs."""
+    clear_contract_registry()
+    invariant_calls = []
+
+    def track_invariant(items, item):
+        invariant_calls.append(len(items))
+        return len(items) <= 10  # Max 10 items
+
+    @contract(
+        invariants=[track_invariant],
+    )
+    def add_item(items: list, item) -> list:
+        items.append(item)
+        return items
+
+    # Should work when invariant holds before and after
+    result = add_item([1, 2, 3], 4)
+    assert result == [1, 2, 3, 4]
+    assert len(invariant_calls) == 2  # Called before and after
+
+    # Should fail when invariant fails AFTER (list becomes too long)
+    invariant_calls.clear()
+    with pytest.raises(ContractError) as exc_info:
+        add_item(list(range(10)), 11)  # Would make 11 items
+
+    assert "Invariant 0 failed after execution" in str(exc_info.value)
+
+
+@spec("CONTRACT-007", "@contract supports old() for capturing pre-state")
+def test_contract_captures_old_values():
+    """Test that capture_old=True provides old values in postconditions."""
+    clear_contract_registry()
+
+    @contract(
+        capture_old=True,
+        ensures=[lambda result, old: len(result) == len(old.items) + 1],
+    )
+    def append_item(items: list, item) -> list:
+        return items + [item]
+
+    # Should work - length increased by 1
+    result = append_item([1, 2, 3], 4)
+    assert result == [1, 2, 3, 4]
+
+    # Test that old captures the ORIGINAL value (not mutated)
+    @contract(
+        capture_old=True,
+        ensures=[lambda result, old: result == old.x + 10],
+    )
+    def add_ten(x: int) -> int:
+        return x + 10
+
+    assert add_ten(5) == 15
+
+
+@spec("CONTRACT-013", "Callable invariants receive function arguments")
+def test_invariants_receive_args():
+    """Test that invariant lambdas receive all function arguments."""
+    clear_contract_registry()
+    received_args = []
+
+    def capture_args(a, b):
+        received_args.append((a, b))
+        return True
+
+    @contract(invariants=[capture_args])
+    def func_with_args(a: int, b: str) -> str:
+        return f"{a}-{b}"
+
+    func_with_args(42, "hello")
+
+    # Called twice (before and after)
+    assert len(received_args) == 2
+    assert received_args[0] == (42, "hello")
+    assert received_args[1] == (42, "hello")
+
+
+@spec("CONTRACT-014", "Old object provides access to captured argument values")
+def test_old_object_access():
+    """Test that Old object provides attribute access to captured values."""
+    clear_contract_registry()
+
+    @contract(
+        capture_old=True,
+        ensures=[
+            lambda result, old: old.a == 1,
+            lambda result, old: old.b == "test",
+            lambda result, old: old.c == [1, 2, 3],
+        ],
+    )
+    def multi_arg_func(a: int, b: str, c: list) -> str:
+        return f"{a}-{b}-{len(c)}"
+
+    result = multi_arg_func(1, "test", [1, 2, 3])
+    assert result == "1-test-3"
+
+
+def test_old_object_deep_copies():
+    """Test that Old captures deep copies to detect mutations."""
+    clear_contract_registry()
+
+    @contract(
+        capture_old=True,
+        ensures=[lambda result, old: old.items == [1, 2, 3]],  # Original value
+    )
+    def mutate_list(items: list) -> list:
+        items.append(999)  # Mutates the list
+        return items
+
+    # old.items should still be [1, 2, 3] even though we mutated it
+    result = mutate_list([1, 2, 3])
+    assert result == [1, 2, 3, 999]
+
+
+@pytest.mark.asyncio
+async def test_invariants_work_with_async():
+    """Test that invariants work with async functions."""
+    clear_contract_registry()
+
+    @contract(
+        invariants=[lambda x: x > 0],
+        ensures=[lambda result: result > 0],
+    )
+    async def async_with_invariant(x: int) -> int:
+        return x * 2
+
+    result = await async_with_invariant(5)
+    assert result == 10
+
+    with pytest.raises(ContractError) as exc_info:
+        await async_with_invariant(-1)
+    assert "Invariant 0 failed before execution" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_old_works_with_async():
+    """Test that capture_old works with async functions."""
+    clear_contract_registry()
+
+    @contract(
+        capture_old=True,
+        ensures=[lambda result, old: result == old.x * 2],
+    )
+    async def async_double(x: int) -> int:
+        return x * 2
+
+    result = await async_double(7)
+    assert result == 14

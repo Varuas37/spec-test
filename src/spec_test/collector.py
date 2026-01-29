@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Iterator
 
-from .types import SpecRequirement, VerificationType
+from .types import RelatedIssue, SpecRequirement, VerificationType
 
 # Pattern: **SPEC-001**: Description
 # Or: - **SPEC-001**: Description
@@ -19,6 +19,13 @@ SPEC_PATTERN = re.compile(
 
 # Pattern to extract individual tags
 TAG_PATTERN = re.compile(r"\[(\w+)\]")
+
+# Pattern: - [ISSUE-001: Title](path/to/issue.md)
+# Or: - [Title](path/to/issue.md)
+ISSUE_LINK_PATTERN = re.compile(
+    r"-\s*\[([^\]]+)\]\(([^)]+\.md)\)",  # - [Title](path.md)
+    re.MULTILINE,
+)
 
 
 def collect_specs(specs_dir: str | Path) -> list[SpecRequirement]:
@@ -51,6 +58,9 @@ def _parse_spec_file(file_path: Path) -> Iterator[SpecRequirement]:
     content = file_path.read_text()
     lines = content.split("\n")
 
+    # Extract related issues from file (applies to all specs in file)
+    related_issues = _extract_related_issues(content, file_path)
+
     for line_num, line in enumerate(lines, 1):
         match = SPEC_PATTERN.search(line)
         if not match:
@@ -78,7 +88,45 @@ def _parse_spec_file(file_path: Path) -> Iterator[SpecRequirement]:
             source_file=file_path,
             source_line=line_num,
             verification_type=verification_type,
+            related_issues=related_issues,
         )
+
+
+def _extract_related_issues(content: str, file_path: Path) -> list[RelatedIssue]:
+    """Extract related issue references from a spec file.
+
+    Looks for a "Related Issue" or "Related Issues" section and extracts
+    markdown links to issue files.
+    """
+    issues = []
+
+    # Find the Related Issue(s) section
+    # Match "## Related Issue" or "## Related Issues"
+    section_pattern = re.compile(
+        r"##\s*Related\s+Issues?\s*\n((?:.*\n)*?)(?=\n##|\Z)",
+        re.IGNORECASE,
+    )
+
+    section_match = section_pattern.search(content)
+    if not section_match:
+        return issues
+
+    section_content = section_match.group(1)
+
+    # Extract all markdown links in the section
+    for match in ISSUE_LINK_PATTERN.finditer(section_content):
+        title = match.group(1)
+        rel_path = match.group(2)
+
+        # Resolve path relative to spec file
+        abs_path = (file_path.parent / rel_path).resolve()
+
+        issues.append(RelatedIssue(
+            title=title,
+            path=str(abs_path),
+        ))
+
+    return issues
 
 
 def collect_spec_ids(specs_dir: str | Path) -> set[str]:

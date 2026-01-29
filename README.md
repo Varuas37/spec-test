@@ -427,11 +427,13 @@ The math is simple:
 
 ## Roadmap
 
-- [x] v1.0: Spec-to-test linking with `@spec` decorator
-- [ ] v2.0: Formal specs with requires/ensures/invariants
-- [ ] v2.1: Runtime contract enforcement
-- [ ] v2.2: Hypothesis property testing integration
-- [ ] v3.0: Z3 formal proof verification
+> **Note:** spec-test is in alpha. APIs may change.
+
+- [x] Spec-to-test linking with `@spec` decorator
+- [x] Runtime contracts with `@contract` (requires/ensures/invariants)
+- [x] `old()` support for comparing pre/post state in postconditions
+- [ ] Hypothesis property testing integration
+- [ ] Z3 formal proof verification
 
 ## Contributing
 

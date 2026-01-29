@@ -26,7 +26,7 @@ Ask clarifying questions if any of these are unclear.
 
 ### Step 2: Create or Update Spec File
 
-Specs live in `specs/*.md` files. Create a new file or add to an existing one.
+Specs live in `design/specs/*.md` files. Create a new file or add to an existing one.
 
 **File naming**: `{domain}.md` (e.g., `auth.md`, `payments.md`)
 
@@ -85,11 +85,13 @@ spec-test list-specs
 
 ### Verification Types
 
-| Type | Meaning |
-|------|---------|
-| (none) | Automated test required |
-| `[manual]` | Manual verification (human check) |
-| `[contract]` | Contract/property-based verification |
+| Type | Meaning | Test Type |
+|------|---------|-----------|
+| (none) | Automated unit test | Fast, pure function test |
+| `[integration]` | Integration test required | Tests real I/O (DB, API, etc.) |
+| `[manual]` | Manual verification | Human check required |
+| `[contract]` | Contract/property-based | Runtime @contract verification |
+| `[provable]` | Formal proof | Z3 mathematical verification |
 
 ## Examples
 
@@ -156,6 +158,43 @@ spec-test list-specs --specs specs
 spec-test verify
 ```
 
+## Architecture: Functional Core, Imperative Shell
+
+When designing features, structure specs to separate:
+
+**Functional Core** (pure logic, most specs):
+- Business rules, calculations, validations
+- Data transformations
+- Decision logic
+
+**Imperative Shell** (side effects, mark as `[integration]`):
+- Database persistence
+- External API calls
+- Email/notification sending
+- File I/O
+
+### Example: Separating Core and Shell Specs
+
+```markdown
+## Order Processing
+
+### Core Logic (unit testable, can use @provable)
+- **ORDER-001**: Order total is sum of item prices
+- **ORDER-002**: Tax calculated at configured rate
+- **ORDER-003**: Discount cannot reduce total below zero
+- **ORDER-004**: Invalid quantity rejected (must be > 0)
+
+### Integration (real I/O, mark as [integration])
+- **ORDER-020** [integration]: Order persists to database
+- **ORDER-021** [integration]: Confirmation email sent after order
+- **ORDER-022** [integration]: Inventory decremented on order
+```
+
+**Why this matters:**
+- Core specs → fast unit tests, Z3 proofs possible
+- Integration specs → slower tests, run separately, fewer of them
+- Clear separation makes testing strategy obvious
+
 ## Checklist
 
 Before moving to implementation:
@@ -163,6 +202,8 @@ Before moving to implementation:
 - [ ] Each requirement has a unique ID
 - [ ] IDs follow PREFIX-NNN convention
 - [ ] Requirements are testable (clear pass/fail criteria)
+- [ ] Pure logic specs separated from I/O specs
+- [ ] I/O specs marked with `[integration]`
 - [ ] Manual verification items are marked `[manual]`
-- [ ] Specs are saved in `specs/*.md`
+- [ ] Specs are saved in `design/specs/*.md`
 - [ ] Running `spec-test list-specs` shows new specs

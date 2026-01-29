@@ -63,6 +63,48 @@ def test_list_specs_command():
         assert "Found 2 specifications" in result.output
 
 
+@spec("CLI-007", "`list-specs` shows related issue for each spec file")
+def test_list_specs_shows_issues():
+    """Test that list-specs --show-issues displays issue status."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Create issues directory
+        issues_dir = tmpdir / "issues"
+        issues_dir.mkdir()
+        (issues_dir / "001-feature.md").write_text("# ISSUE-001")
+
+        # Create specs directory
+        specs_dir = tmpdir / "specs"
+        specs_dir.mkdir()
+
+        # Spec with issue
+        (specs_dir / "with-issue.md").write_text("""# Spec With Issue
+
+## Related Issue
+- [ISSUE-001: Feature](../issues/001-feature.md)
+
+## Requirements
+- **WITH-001**: Has issue
+""")
+
+        # Spec without issue
+        (specs_dir / "no-issue.md").write_text("""# Spec Without Issue
+
+## Requirements
+- **NO-001**: No issue
+""")
+
+        result = runner.invoke(app, ["list-specs", "-s", str(specs_dir), "--show-issues"])
+
+        assert result.exit_code == 0
+        assert "WITH-001" in result.output
+        assert "NO-001" in result.output
+        assert "1 with issues" in result.output
+        assert "1 missing issues" in result.output
+        assert "No related issue" in result.output
+
+
 @spec("CLI-003", "`check` command verifies single spec")
 def test_check_command():
     """Test that check command verifies a single spec."""
@@ -86,22 +128,28 @@ def test_check_command():
 
 @spec("CLI-004", "`init` command scaffolds project")
 def test_init_command():
-    """Test that init command creates spec directory structure."""
+    """Test that init command creates design directory structure."""
     with tempfile.TemporaryDirectory() as tmpdir:
         result = runner.invoke(app, ["init", tmpdir])
 
         assert result.exit_code == 0
         assert "Created" in result.output
-        assert "specs" in result.output
+        assert "design" in result.output
         assert "CLAUDE.md" in result.output
 
-        # Check directory was created
-        specs_dir = Path(tmpdir) / "specs"
-        assert specs_dir.exists()
+        # Check design directories were created
+        design_dir = Path(tmpdir) / "design"
+        assert design_dir.exists()
+        assert (design_dir / "specs").exists()
+        assert (design_dir / "issues").exists()
+        assert (design_dir / "prompts").exists()
 
-        # Check example file was created
-        example_file = specs_dir / "example.md"
-        assert example_file.exists()
+        # Check example files were created
+        example_spec = design_dir / "specs" / "example.md"
+        assert example_spec.exists()
+
+        example_issue = design_dir / "issues" / "001-example.md"
+        assert example_issue.exists()
 
         # Check CLAUDE.md was created
         claude_file = Path(tmpdir) / "CLAUDE.md"

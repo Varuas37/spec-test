@@ -3,6 +3,10 @@
 ## Overview
 spec-test is a tool for specification-driven development that links requirements to tests.
 
+## Related Issues
+- [ISSUE-001: Core Spec-Test Functionality](../issues/001-core-spec-test.md)
+- [ISSUE-005: Spec-to-Issue Verification](../issues/005-spec-issue-verification.md)
+
 ## Decorator Requirements
 
 ### @spec Decorator
@@ -21,6 +25,8 @@ spec-test is a tool for specification-driven development that links requirements
 - **COL-002**: Collector extracts verification type from [brackets]
 - **COL-003**: Collector searches nested directories recursively within specs/
 - **COL-004**: Collector skips files starting with underscore
+- **COL-005**: Collector extracts related issue references from spec files
+- **COL-006**: Collector reports specs missing related issues
 
 ## Runner Requirements
 
@@ -52,3 +58,4 @@ spec-test is a tool for specification-driven development that links requirements
 - **CLI-004**: `init` command scaffolds project
 - **CLI-005**: Exit code 1 on test failures
 - **CLI-006**: Exit code 2 on missing tests (when --fail-on-missing)
+- **CLI-007**: `list-specs` shows related issue for each spec file
