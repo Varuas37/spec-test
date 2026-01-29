@@ -157,6 +157,12 @@ def list_specs(
         "-s",
         help="Directory containing spec markdown files",
     ),
+    show_issues: bool = typer.Option(
+        False,
+        "--show-issues",
+        "-i",
+        help="Show related issue status for each spec",
+    ),
 ):
     """List all specifications found in spec files."""
     specs = collect_specs(specs_dir)
@@ -165,11 +171,32 @@ def list_specs(
         console.print("[yellow]No specifications found[/yellow]")
         raise typer.Exit(code=0)
 
-    console.print(f"\n[bold]Found {len(specs)} specifications:[/bold]\n")
+    # Count specs with/without issues
+    with_issues = sum(1 for s in specs if s.has_issue)
+    without_issues = len(specs) - with_issues
+
+    console.print(f"\n[bold]Found {len(specs)} specifications:[/bold]")
+    if show_issues:
+        issue_status = f"[green]{with_issues} with issues[/green]"
+        if without_issues > 0:
+            issue_status += f", [yellow]{without_issues} missing issues[/yellow]"
+        console.print(f"  {issue_status}\n")
+    else:
+        console.print()
 
     for spec in sorted(specs, key=lambda s: s.id):
         console.print(f"  [cyan]{spec.id}[/cyan]: {spec.description}")
         console.print(f"    [dim]{spec.source_file}:{spec.source_line}[/dim]")
+
+        if show_issues:
+            if spec.has_issue:
+                for issue in spec.related_issues:
+                    exists = Path(issue.path).exists()
+                    status = "[green]✓[/green]" if exists else "[red]✗ not found[/red]"
+                    console.print(f"    Issue: {status} {issue.title}")
+            else:
+                console.print(f"    Issue: [yellow]⚠ No related issue[/yellow]")
+
     console.print()
 
 

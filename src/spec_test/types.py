@@ -22,6 +22,18 @@ class VerificationType(Enum):
 
 
 @dataclass
+class RelatedIssue:
+    """A reference to a related issue from a spec file."""
+    title: str
+    path: str  # Relative path to issue file
+
+    @property
+    def exists(self) -> bool:
+        """Check if the issue file exists (relative to spec file)."""
+        return Path(self.path).exists()
+
+
+@dataclass
 class SpecRequirement:
     """A single specification requirement parsed from markdown."""
     id: str
@@ -29,9 +41,15 @@ class SpecRequirement:
     source_file: Path
     source_line: int
     verification_type: VerificationType = VerificationType.TEST
+    related_issues: list[RelatedIssue] = field(default_factory=list)
 
     def __hash__(self):
         return hash(self.id)
+
+    @property
+    def has_issue(self) -> bool:
+        """Check if this spec has at least one related issue."""
+        return len(self.related_issues) > 0
 
 
 @dataclass

@@ -88,3 +88,54 @@ def test_collector_skips_underscore_files():
         assert "INDEX-001" not in spec_ids
         assert "INT-001" not in spec_ids
         assert len(specs) == 2
+
+
+@spec("COL-005", "Collector extracts related issue references from spec files")
+def test_collector_extracts_related_issues():
+    """Test that collector parses Related Issue section from spec files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create issues directory and issue file
+        issues_dir = Path(tmpdir) / "issues"
+        issues_dir.mkdir()
+        (issues_dir / "001-feature.md").write_text("# ISSUE-001: Feature")
+
+        # Create spec file with related issue
+        specs_dir = Path(tmpdir) / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "feature.md").write_text("""# Feature Spec
+
+## Related Issue
+- [ISSUE-001: Feature](../issues/001-feature.md)
+
+## Requirements
+- **FEAT-001**: First requirement
+- **FEAT-002**: Second requirement
+""")
+
+        specs = collect_specs(specs_dir)
+
+        assert len(specs) == 2
+        # Both specs should have the same related issue
+        for s in specs:
+            assert s.has_issue
+            assert len(s.related_issues) == 1
+            assert "ISSUE-001" in s.related_issues[0].title
+
+
+@spec("COL-006", "Collector reports specs missing related issues")
+def test_collector_reports_missing_issues():
+    """Test that specs without Related Issue section have empty related_issues."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create spec file without related issue
+        spec_file = Path(tmpdir) / "no-issue.md"
+        spec_file.write_text("""# Feature Spec
+
+## Requirements
+- **FEAT-001**: First requirement
+""")
+
+        specs = collect_specs(tmpdir)
+
+        assert len(specs) == 1
+        assert not specs[0].has_issue
+        assert len(specs[0].related_issues) == 0
