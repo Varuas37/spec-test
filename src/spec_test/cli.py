@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from . import __version__
 from .collector import collect_specs
 from .prover import (
     ProofResult,
@@ -24,6 +25,27 @@ app = typer.Typer(
     help="Make AI-generated code trustworthy through mathematical verification",
 )
 console = Console()
+
+
+def version_callback(value: bool):
+    """Display version and exit."""
+    if value:
+        console.print(f"spec-test version {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        help="Show version and exit",
+        callback=version_callback,
+        is_eager=True,
+    ),
+):
+    """spec-test: Make AI-generated code trustworthy through mathematical verification."""
+    pass
 
 
 @app.command()
