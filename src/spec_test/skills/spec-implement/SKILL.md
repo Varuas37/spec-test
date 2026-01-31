@@ -1,4 +1,7 @@
-# spec-implement: Implement Code That Matches Specifications
+---
+name: spec-implement
+description: Implement Code Matching Specs
+---
 
 ## Overview
 

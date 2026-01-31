@@ -1,4 +1,7 @@
-# spec-workflow: Complete Specification-Driven Development
+---
+name: spec-workflow
+description: Complete Specification-Driven Development
+---
 
 ## Overview
 

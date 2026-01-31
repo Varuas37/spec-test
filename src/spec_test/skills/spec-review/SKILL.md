@@ -1,4 +1,7 @@
-# spec-review: Review Specifications
+---
+name: spec-review
+description: Review Specifications for Completeness
+---
 
 ## Overview
 

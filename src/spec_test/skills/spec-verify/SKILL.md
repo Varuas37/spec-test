@@ -1,4 +1,7 @@
-# spec-verify: Run Verification and Fix Issues
+---
+name: spec-verify
+description: Run Verification and Fix Issues
+---
 
 ## Overview
 

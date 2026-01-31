@@ -1,4 +1,7 @@
-# spec-feature: Create a New Feature with Specifications
+---
+name: spec-feature
+description: Define Features and Specifications
+---
 
 ## Overview
 

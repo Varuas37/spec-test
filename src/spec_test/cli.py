@@ -1,5 +1,6 @@
 """Command-line interface for spec-test."""
 
+import shutil
 import subprocess
 import sys
 from importlib import resources
@@ -446,9 +447,9 @@ def _install_skills(path: Path) -> list[str]:
     except (TypeError, AttributeError, FileNotFoundError):
         pass
 
-    # Fall back to project root for development mode
-    # __file__ is src/spec_test/cli.py, so .parent.parent.parent gets to project root
-    dev_skills = Path(__file__).parent.parent.parent / "skills"
+    # Fall back to src/spec_test/skills for development mode
+    # __file__ is src/spec_test/cli.py
+    dev_skills = Path(__file__).parent / "skills"
     if dev_skills.exists() and dev_skills.is_dir():
         skills_sources.append(("dev", dev_skills))
 
@@ -462,18 +463,28 @@ def _install_skills(path: Path) -> list[str]:
 
     if source_type == "package":
         # Use importlib.resources traversable
-        for skill_file in source_path.iterdir():
-            if skill_file.is_file() and skill_file.name.endswith(".md"):
-                dest = skills_dir / skill_file.name
-                dest.write_text(skill_file.read_text())
-                installed.append(skill_file.name)
+        for skill_item in source_path.iterdir():
+            # Copy skill directories (each contains SKILL.md)
+            if skill_item.is_dir() and skill_item.name.startswith("spec-"):
+                dest_dir = skills_dir / skill_item.name
+                dest_dir.mkdir(exist_ok=True)
+
+                # Copy SKILL.md from the skill directory
+                skill_file = skill_item / "SKILL.md"
+                if skill_file.exists():
+                    dest_file = dest_dir / "SKILL.md"
+                    dest_file.write_text(skill_file.read_text())
+                    installed.append(skill_item.name)
     else:
         # Use regular Path for dev mode
-        for skill_file in source_path.iterdir():
-            if skill_file.is_file() and skill_file.name.endswith(".md"):
-                dest = skills_dir / skill_file.name
-                dest.write_text(skill_file.read_text())
-                installed.append(skill_file.name)
+        for skill_item in source_path.iterdir():
+            # Copy skill directories (each contains SKILL.md)
+            if skill_item.is_dir() and skill_item.name.startswith("spec-"):
+                dest_dir = skills_dir / skill_item.name
+                if dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                shutil.copytree(skill_item, dest_dir)
+                installed.append(skill_item.name)
 
     return sorted(installed)
 
@@ -613,7 +624,7 @@ spec-test check PREFIX-001  # Check single spec
             console.print(f"  - {skill}")
         console.print("\n[yellow]To use these skills with Claude Code:[/yellow]")
         console.print("  Add them to your agent system by running:")
-        console.print("  [dim]claude-code skills add .claude/skills/*.md[/dim]")
+        console.print("  [dim]claude-code skills add .claude/skills/*[/dim]")
         console.print("  Then you can use them with: /spec-workflow, /spec-issue, etc.")
 
     console.print("\n[green]Ready! Run 'spec-test verify' to check your specs.[/green]")

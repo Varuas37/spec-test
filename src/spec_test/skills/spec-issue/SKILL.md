@@ -1,4 +1,7 @@
-# spec-issue: Write a Detailed Issue
+---
+name: spec-issue
+description: Create and Document Issues
+---
 
 ## Overview
 
