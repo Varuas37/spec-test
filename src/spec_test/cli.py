@@ -515,7 +515,7 @@ def _setup_git_hooks(path: Path) -> bool:
     # Create pre-commit hook script
     hook_script = """#!/bin/sh
 # spec-test verification hook
-# Prevents commits when specs are failing
+# Prevents commits when specs are failing or missing tests
 
 echo "Running spec-test verification..."
 
@@ -531,11 +531,14 @@ else
     exit 1
 fi
 
-$SPEC_TEST_CMD verify --no-fail-on-missing
+$SPEC_TEST_CMD verify
 
 if [ $? -ne 0 ]; then
+    echo ""
     echo "❌ Commit blocked: spec-test verification failed"
-    echo "Fix failing specs before committing, or skip with: git commit --no-verify"
+    echo "   - Fix failing tests"
+    echo "   - Add missing tests"
+    echo "   - Or skip with: git commit --no-verify"
     exit 1
 fi
 
