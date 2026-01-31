@@ -585,9 +585,14 @@ spec-test check PREFIX-001  # Check single spec
     # Install AI agent skills
     installed_skills = _install_skills(path)
     if installed_skills:
-        console.print("Installed AI agent skills to .claude/skills/")
+        console.print("\n[bold cyan]AI Agent Skills Installed[/bold cyan]")
+        console.print("Installed skills to .claude/skills/:")
         for skill in installed_skills:
             console.print(f"  - {skill}")
+        console.print("\n[yellow]To use these skills with Claude Code:[/yellow]")
+        console.print("  Add them to your agent system by running:")
+        console.print("  [dim]claude-code skills add .claude/skills/*.md[/dim]")
+        console.print("  Then you can use them with: /spec-workflow, /spec-issue, etc.")
 
     console.print("\n[green]Ready! Run 'spec-test verify' to check your specs.[/green]")
 
