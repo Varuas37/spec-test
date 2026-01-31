@@ -1,6 +1,7 @@
 """Command-line interface for spec-test."""
 
 import shutil
+import stat
 import subprocess
 import sys
 from importlib import resources
@@ -489,11 +490,77 @@ def _install_skills(path: Path) -> list[str]:
     return sorted(installed)
 
 
+def _setup_git_hooks(path: Path) -> bool:
+    """Set up git pre-commit hook to run spec-test verify.
+
+    Returns True if successful, False otherwise.
+    """
+    git_dir = path / ".git"
+    if not git_dir.exists() or not git_dir.is_dir():
+        console.print("[yellow]Warning: .git directory not found. Initialize git first.[/yellow]")
+        return False
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+
+    pre_commit_hook = hooks_dir / "pre-commit"
+
+    # Check if hook already exists
+    if pre_commit_hook.exists():
+        console.print(f"[yellow]Warning: {pre_commit_hook} already exists.[/yellow]")
+        console.print("Backing up existing hook to pre-commit.backup")
+        backup_path = hooks_dir / "pre-commit.backup"
+        shutil.copy(pre_commit_hook, backup_path)
+
+    # Create pre-commit hook script
+    hook_script = """#!/bin/sh
+# spec-test verification hook
+# Prevents commits when specs are failing
+
+echo "Running spec-test verification..."
+
+# Try to find spec-test in common locations
+if command -v spec-test >/dev/null 2>&1; then
+    SPEC_TEST_CMD="spec-test"
+elif command -v python3 >/dev/null 2>&1; then
+    SPEC_TEST_CMD="python3 -m spec_test.cli"
+elif command -v python >/dev/null 2>&1; then
+    SPEC_TEST_CMD="python -m spec_test.cli"
+else
+    echo "❌ Cannot find spec-test or python. Install spec-test first."
+    exit 1
+fi
+
+$SPEC_TEST_CMD verify --no-fail-on-missing
+
+if [ $? -ne 0 ]; then
+    echo "❌ Commit blocked: spec-test verification failed"
+    echo "Fix failing specs before committing, or skip with: git commit --no-verify"
+    exit 1
+fi
+
+echo "✅ All specs verified"
+exit 0
+"""
+
+    pre_commit_hook.write_text(hook_script)
+
+    # Make hook executable
+    pre_commit_hook.chmod(pre_commit_hook.stat().st_mode | stat.S_IEXEC)
+
+    return True
+
+
 @app.command()
 def init(
     path: Path = typer.Argument(
         Path("."),
         help="Project root to initialize",
+    ),
+    enable_git_workflow: bool = typer.Option(
+        False,
+        "--enable-git-workflow",
+        help="Set up git pre-commit hook to run spec-test verify",
     ),
 ):
     """Initialize spec-test in a project."""
@@ -626,6 +693,16 @@ spec-test check PREFIX-001  # Check single spec
         console.print("  Add them to your agent system by running:")
         console.print("  [dim]claude-code skills add .claude/skills/*[/dim]")
         console.print("  Then you can use them with: /spec-workflow, /spec-issue, etc.")
+
+    # Set up git workflow if requested
+    if enable_git_workflow:
+        console.print()
+        if _setup_git_hooks(path):
+            console.print("[bold green]✓ Git pre-commit hook installed[/bold green]")
+            console.print("  Specs will be verified before each commit")
+            console.print("  Skip verification with: [dim]git commit --no-verify[/dim]")
+        else:
+            console.print("[yellow]Git workflow setup skipped[/yellow]")
 
     console.print("\n[green]Ready! Run 'spec-test verify' to check your specs.[/green]")
 
