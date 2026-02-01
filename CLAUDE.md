@@ -62,6 +62,20 @@ Follow **Functional Core, Imperative Shell** with **Dependency Injection**:
 └─────────────────────────────────────────┘
 ```
 
+## Versioning
+
+Follow semantic versioning (0.MINOR.PATCH) in pre-1.0:
+
+- **PATCH** (0.x.Y): Bug fixes, performance improvements, refactoring
+- **MINOR** (0.X.0): New features, breaking changes (API changes)
+- **MAJOR** (X.0.0): Reserved for 1.0.0+ stable release
+
+Examples:
+- Performance optimization: 0.3.3 → 0.3.4 ✓
+- Bug fix: 0.3.3 → 0.3.4 ✓
+- New feature: 0.3.3 → 0.4.0 ✓
+- Breaking change: 0.3.3 → 0.4.0 ✓
+
 ## Rules
 
 1. Write an issue before writing specs
@@ -69,3 +83,4 @@ Follow **Functional Core, Imperative Shell** with **Dependency Injection**:
 3. Every spec ID must have a corresponding `@spec` test
 4. Run `spec-test verify` before committing
 5. Prefer pure functions; push side effects to the edges
+6. Use patch versions (0.x.Y) for fixes and optimizations
