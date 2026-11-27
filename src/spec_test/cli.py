@@ -57,7 +57,7 @@ def main(
 
 @app.command()
 def trace(
-    index: Path = typer.Option(..., "--index", help="Versioned source annotation index"),
+    index: list[Path] = typer.Option(..., "--index", help="Versioned source annotation index (repeatable)"),
     specs_dir: Path = typer.Option(Path("design/specs"), "--specs"),
     required: Optional[list[str]] = typer.Option(None, "--require", help="Required spec ID"),
 ) -> None:

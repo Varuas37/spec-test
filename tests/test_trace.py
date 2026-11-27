@@ -79,3 +79,28 @@ def test_trace_rejects_other_versions_and_duplicate_requirements(trace):
     assert "schema version" in run(rows, version=True).stderr
     spec_file.write_text(spec_file.read_text() * 2)
     assert "Duplicate requirement ID" in run(rows).stderr
+
+
+def test_combines_indexes_without_borrowing_roles_from_other_languages(trace, tmp_path):
+    _, spec_file = trace
+    rust, ts = tmp_path / "rust.json", tmp_path / "ts.json"
+
+    def save(index, rows):
+        index.write_text(json.dumps({"schema_version": 1, "links": rows}))
+
+    save(rust, [link("implements"), link("verifies")])
+    ts_implementation = link("implements", language="typescript", file="src/queue.ts")
+    save(ts, [ts_implementation])
+    args = ["trace", "--specs", str(spec_file.parent), "--index", str(rust), "--index", str(ts)]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 2
+    assert "typescript): missing trace roles: verifies" in result.stderr
+    save(ts, [ts_implementation, link("verifies", language="typescript", file="tests/queue.ts")])
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.output
+    [row] = json.loads(result.stdout)["requirements"]
+    assert {(l["language"], l["role"]) for l in row["links"]} == {
+        (language, role)
+        for language in ("rust", "typescript")
+        for role in ("implements", "verifies")
+    }
