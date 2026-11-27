@@ -23,6 +23,7 @@ from .prover import (
     verify_function,
 )
 from .reporter import Reporter
+from . import repo_plan
 from .types import SpecStatus, VerificationType
 from .verifier import SpecVerifier
 
@@ -804,6 +805,46 @@ spec-test check PREFIX-001  # Check single spec
             console.print("[yellow]Git workflow setup skipped[/yellow]")
 
     console.print("\n[green]Ready! Run 'spec-test verify' to check your specs.[/green]")
+
+
+@app.command()
+def plan(
+    root: Path = typer.Option(Path("."), "--root", help="Repository or project directory"),
+    write_config: bool = typer.Option(False, "--write-config", help="Save detected checks without overwriting"),
+) -> None:
+    """Detect native checks or read spec-test.toml, without running commands."""
+    try:
+        result = repo_plan.discover(root)
+        if write_config:
+            repo_plan.write_config(root, result)
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(json.dumps(result.as_dict(), indent=2))
+
+
+@app.command("run-checks")
+def run_checks(
+    root: Path = typer.Option(Path("."), "--root", help="Repository or project directory"),
+    trust_repo: bool = typer.Option(False, "--trust-repo", help="Authorize execution of repository code"),
+) -> None:
+    """Run planned native checks in a trusted checkout; does not satisfy spec IDs by itself."""
+    if not trust_repo:
+        typer.echo("Review spec-test plan, then use --trust-repo to run repository code.", err=True)
+        raise typer.Exit(2)
+    try:
+        root = root.resolve(strict=True)
+        result = repo_plan.discover(root)
+        for note in result.notes:
+            typer.echo(note, err=True)
+        if not result.checks:
+            raise ValueError("No runnable checks in this project")
+        status = repo_plan.run_checks(root, result)
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    if status:
+        raise typer.Exit(status)
 
 
 if __name__ == "__main__":
