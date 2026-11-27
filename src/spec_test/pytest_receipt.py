@@ -17,6 +17,14 @@ class Receipt:
     def __init__(self, output):
         self.output = output
         self.tests = {}
+        self.selected = set()
+        self.deselected = set()
+
+    def pytest_deselected(self, items):
+        self.deselected.update(item.nodeid for item in items)
+
+    def pytest_collection_finish(self, session):
+        self.selected.update(item.nodeid for item in session.items)
 
     def pytest_runtest_logreport(self, report):
         self.tests.setdefault(report.nodeid, []).append(
@@ -28,5 +36,11 @@ class Receipt:
         if self.output:
             with open(self.output, "w", encoding="utf-8") as file:
                 json.dump(
-                    {"root": str(session.config.rootpath), "tests": self.tests}, file
+                    {
+                        "root": str(session.config.rootpath),
+                        "tests": self.tests,
+                        "selected": sorted(self.selected),
+                        "deselected": sorted(self.deselected),
+                    },
+                    file,
                 )

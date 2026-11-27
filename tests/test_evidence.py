@@ -144,3 +144,37 @@ def test_numbered_prefix_cannot_hide_the_proof_roadmap(tmp_path):
     p.write_text(json.dumps({"schema_version": 1, "checks": [row]}))
     args = ["verify", "-s", str(specs), "-t", str(tests), "--evidence", str(p)]
     assert CliRunner().invoke(app, args).exit_code == 0
+
+
+@spec("EVID-008", "Deselected parameter cases make the full requirement inconclusive")
+def test_filters_cannot_hide_an_unexecuted_case(tmp_path, monkeypatch):
+    specs, tests, _ = subject(tmp_path, "**CASE-001**: Every case matters\n")
+    (tests / "test_cases.py").write_text("""
+import pytest
+from spec_test import spec
+
+@spec("CASE-001", "One passing and one failing case")
+@pytest.mark.parametrize("value", [0, 1], ids=["good", "bad"])
+def test_values(value): assert value == 0
+""")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k good")
+    report = SpecVerifier(specs, tests).verify()
+    assert report.unknown == 1 and not report.is_passing
+
+
+@spec("EVID-009", "Explicit parameter selectors keep their individual outcomes")
+def test_batch_reports_individual_parameter_outcomes(tmp_path):
+    from spec_test.runner import run_tests_batch
+
+    path = tmp_path / "test_cases.py"
+    path.write_text("""
+import pytest
+
+@pytest.mark.parametrize("value", [0, 1], ids=["a [nested]::good", "bad"])
+def test_values(value): assert value == 0
+""")
+    good = f"{path}::test_values[a [nested]::good]"
+    bad = f"{path}::test_values[bad]"
+    results = run_tests_batch([good, bad], tmp_path)
+    assert results[good] == (True, None)
+    assert results[bad][0] is False and "failed" in results[bad][1]

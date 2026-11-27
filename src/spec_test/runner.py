@@ -104,7 +104,7 @@ def run_tests_batch(test_paths: list[str], tests_dir: Path) -> dict[str, tuple[b
 
 def _node_key(node_id: str, root: Path) -> tuple[Path, str]:
     file, _, nodes = node_id.partition("::")
-    return (root / file).resolve(), nodes.split("[", 1)[0]
+    return (root / file).resolve(), nodes
 
 
 def run_test_receipts(test_paths: list[str]) -> dict[str, tuple[str, Optional[str]]]:
@@ -126,10 +126,16 @@ def run_test_receipts(test_paths: list[str]) -> dict[str, tuple[str, Optional[st
             return {path: ("unknown", reason or "pytest did not finish") for path in paths}
         data = json.loads(receipt.read_text(encoding="utf-8"))
 
-    cases: dict[tuple[Path, str], list[str]] = {}
-    for node_id, stages in data["tests"].items():
+    exact: dict[tuple[Path, str], str] = {}
+    groups: dict[tuple[Path, str], list[str]] = {}
+    deselected = set(data["deselected"]) - set(data["selected"])
+    all_cases = set(data["selected"]) | deselected | data["tests"].keys()
+    for node_id in all_cases:
         key = _node_key(node_id, Path(data["root"]))
-        if any(outcome == "failed" for _, outcome, _ in stages):
+        stages = data["tests"].get(node_id, [])
+        if node_id in deselected:
+            state = "unknown"
+        elif any(outcome == "failed" for _, outcome, _ in stages):
             state = "failed"
         elif any(outcome == "skipped" or xfail for _, outcome, xfail in stages):
             state = "skipped"
@@ -139,11 +145,14 @@ def run_test_receipts(test_paths: list[str]) -> dict[str, tuple[str, Optional[st
             state = "passed"
         else:
             state = "unknown"
-        cases.setdefault(key, []).append(state)
+        exact[key] = state
+        file, nodes = key
+        groups.setdefault((file, nodes.split("[", 1)[0]), []).append(state)
 
     results = {}
     for path in paths:
-        observed = cases.get(_node_key(path, Path.cwd()), [])
+        key = _node_key(path, Path.cwd())
+        observed = [exact.get(key, "unknown")] if "[" in key[1] else groups.get(key, [])
         state = next(
             (s for s in ("failed", "unknown", "skipped", "passed") if s in observed), "unknown"
         )
