@@ -189,10 +189,8 @@ def verify_function(func: Callable) -> ProofOutcome:
             if param.kind not in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD):
                 raise ValueError("Only positional parameters are supported")
             z3_vars[name] = _create_z3_variable(name, param.annotation)
-        result = _translate_return(original, z3_vars)
         expected = _create_z3_variable("expected_return_sort", sig.return_annotation)
-        if not result.sort().eq(expected.sort()):
-            raise ValueError("Return expression does not match declared type")
+        result = _translate_return(original, z3_vars, expected.sort())
 
         preconditions = [
             _translate_predicate(cond, z3_vars, match_names=True)
@@ -204,7 +202,7 @@ def verify_function(func: Callable) -> ProofOutcome:
             _translate_predicate(cond, {"result": result})
             for cond in contract_info.ensures
         ]
-    except (TypeError, ValueError, OSError, SyntaxError, z3.Z3Exception) as exc:
+    except (TypeError, ValueError, OSError, SyntaxError, RecursionError, z3.Z3Exception) as exc:
         return skipped(f"Unsupported proof: {exc}")
 
     # Create Z3 solver
@@ -304,7 +302,7 @@ def _proof_body(func: Callable) -> Callable:
     return original
 
 
-def _translate_return(func: Callable, variables: dict[str, Any]) -> Any:
+def _translate_return(func: Callable, variables: dict[str, Any], expected_sort: Any) -> Any:
     if func.__code__.co_freevars:
         raise ValueError("Closures are not supported")
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
@@ -317,11 +315,38 @@ def _translate_return(func: Callable, variables: dict[str, Any]) -> Any:
         and isinstance(body[0].value.value, str)
     ):
         body.pop(0)
-    if len(body) != 1 or not isinstance(body[0], ast.Return) or body[0].value is None:
-        raise ValueError("Expected a single return expression")
-    result = _ast_to_z3(body[0].value, variables)
+    result = _translate_block(body, variables, expected_sort, continuation=None)
     if result is None:
-        raise ValueError("Cannot model the return expression")
+        raise ValueError("A control path falls through without a return")
+    return result
+
+
+def _translate_block(
+    body: list[ast.stmt],
+    variables: dict[str, Any],
+    expected_sort: Any,
+    continuation: Any,
+) -> Any:
+    """Fold a pure block over what runs if it does not return itself."""
+    result = continuation
+    for statement in reversed(body):
+        if isinstance(statement, ast.Return):
+            result = _ast_to_z3(statement.value, variables)
+            if result is None:
+                raise ValueError("Cannot model the return expression")
+            if not result.sort().eq(expected_sort):
+                raise ValueError("Return expression does not match declared type")
+        elif isinstance(statement, ast.If):
+            test = _ast_to_z3(statement.test, variables)
+            if not z3.is_bool(test):
+                raise ValueError("Only supported boolean branch conditions can be modeled")
+            yes = _translate_block(statement.body, variables, expected_sort, result)
+            no = _translate_block(statement.orelse, variables, expected_sort, result)
+            if yes is None or no is None:
+                raise ValueError("A control path falls through without a return")
+            result = z3.If(test, yes, no)
+        else:
+            raise ValueError(f"Cannot model statement: {type(statement).__name__}")
     return result
 
 

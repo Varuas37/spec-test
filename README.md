@@ -306,9 +306,10 @@ $ spec-test verify --proofs --proof-module my_package.proofs --fail-on-unknown
 Proven: 1 | Refuted: 0 | Unknown: 0 | Skipped: 0
 ```
 
-The initial proof subset is a single return expression over explicit Python
-`int` and `bool` values, including arithmetic (`+`, `-`, `*`), comparisons,
-Boolean logic, and ternaries. Z3 checks the actual modeled return against every
+The proof subset uses explicit Python `int` and `bool` values, including
+arithmetic (`+`, `-`, `*`), comparisons, Boolean logic, and ternaries. Pure
+`if`/`elif`/`else` statements and early returns are supported when every
+structural path returns the declared type. Z3 checks the actual modeled return against every
 postcondition, under every precondition. Unsupported code or predicates and
 contradictory preconditions never count as proved. A refutation prints the input
 values. Runtime checks remain on. Use `--fail-on-unknown` in CI to reject skipped
