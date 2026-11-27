@@ -22,15 +22,29 @@ reports `failed` and the process exits nonzero. The property result is a finite
 exhaustive check, not a solver proof. The Kani row is explicitly `skipped`:
 this binary never runs Kani or upgrades that result automatically.
 
-With a supported [Kani installation](https://model-checking.github.io/kani/install-guide.html),
-run the separate implementation-proof lane:
+For opt-in implementation-proof evidence, [install and set up Kani 0.68.0](https://model-checking.github.io/kani/install-guide.html)
+first. With Python 3.11+ and that Kani installation on `PATH`, run from this
+directory:
 
 ```sh
-cargo kani --harness queue_001_transition
+cargo run --locked --quiet --bin verify -- --native-only > rust.json
+python verify_kani.py > kani.json
 ```
 
-Check that the named harness ran, verification succeeded, and all three
-coverage goals are reachable before recording a proof result. The harness has
-no deliberate input restrictions beyond the two `u8` types and no loops to
-unwind. It invokes the same implementation, not an independently rewritten
-model. Neither the proof nor the tests cover queue storage, concurrency or I/O.
+The producer accepts only a fresh native Kani export from this invocation:
+the exact named harness must complete successfully, its implementation checks
+must pass, and the invalid, full, and available states must all be reachable.
+It exits nonzero and emits a `failed` proof row if the check cannot be
+established. The native-only flag omits the ordinary runner's `skipped` Kani
+placeholder so both receipts can be passed to `spec-test verify` together.
+
+The harness has no deliberate input restrictions beyond the two `u8` types
+and no loops to unwind. It invokes the same implementation, not an
+independently rewritten model. Neither the proof nor the tests cover queue
+storage, concurrency or I/O.
+
+Run the producer's report and failure tests without installing Kani:
+
+```sh
+python -m unittest discover -p 'test_verify_kani.py'
+```
