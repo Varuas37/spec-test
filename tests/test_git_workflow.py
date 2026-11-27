@@ -1,11 +1,13 @@
 """Tests for git workflow integration."""
 
+import os
 import stat
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from rich.text import Text
 
 from spec_test import spec
 
@@ -333,7 +335,8 @@ def test_cli_help_documents_flag():
         "init", "--help",
         capture_output=True,
         text=True,
+        env={**os.environ, "COLUMNS": "120", "FORCE_COLOR": "1"},
     )
 
-    assert "--enable-git-workflow" in result.stdout
+    assert "--enable-git-workflow" in Text.from_ansi(result.stdout).plain
     assert result.returncode == 0
