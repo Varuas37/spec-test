@@ -7,6 +7,7 @@ export type EnqueueResult =
 const u8 = (value: number) => Number.isInteger(value) && value >= 0 && value <= 255;
 
 // QUEUE-001 models the admission boundary, not queue storage or concurrency.
+/** @specTestImplements QUEUE-001 */
 export const enqueue = contract(
   "QUEUE-001",
   (len: number, capacity: number): EnqueueResult => {

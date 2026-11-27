@@ -29,3 +29,26 @@ outside that domain or for queue storage and concurrency.
 Specs, test vectors, and evidence can be shared across languages; solver
 outputs belong in a separate model- or implementation-proof lane. This
 adapter does not claim to prove general TypeScript or any production runtime.
+
+## Trace implementation and verification locations
+
+Add `/** @specTestImplements QUEUE-001 */` on a named function, a single named
+variable declaration, a class, or a class method. Repeat the tag once per
+requirement. A class link does not automatically tag its methods. The scanner
+also recognizes top-level literal calls to this adapter's imported
+`specTest` and `specProperty` helpers. A separate labeled function may use
+`@specTestVerifies`; that is a source link, not an executed test.
+
+From the repository root:
+
+```sh
+node adapters/typescript/trace.mjs adapters/typescript/src/queue.ts \
+  adapters/typescript/test/queue.test.ts > /tmp/ts-trace.json
+spec-test trace --specs design/specs/queue-only --index /tmp/ts-trace.json \
+  --require QUEUE-001
+```
+
+The ts index uses the same schema as Rust; repeat `--index` to combine
+languages. Every represented language must provide both roles on its own.
+TypeScript Vitest results are separate evidence; this trace is not a solver
+proof.

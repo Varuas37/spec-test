@@ -38,6 +38,16 @@ jobs:
         run: |
           npm --prefix adapters/typescript ci --no-audit --no-fund
           npm --prefix adapters/typescript run verify
+      - name: Validate TypeScript source links
+        run: |
+          node --test adapters/typescript/trace.test.mjs
+          node adapters/typescript/trace.mjs adapters/typescript/src/queue.ts \
+            adapters/typescript/test/queue.test.ts > "$RUNNER_TEMP/ts-trace.json"
+          uv run --locked spec-test trace --specs design/specs/queue-only \
+            --index "$RUNNER_TEMP/ts-trace.json" --require QUEUE-001
+          uv run --locked spec-test trace --specs design/specs/queue-only \
+            --index "$RUNNER_TEMP/rust-trace.json" --index "$RUNNER_TEMP/ts-trace.json" \
+            --require QUEUE-001
       - name: Combine the actual native receipts
         run: |
           uv run --locked spec-test verify --require-issues --specs design/specs/queue-only \

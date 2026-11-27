@@ -63,9 +63,12 @@ def _load_links(path: Path) -> list[TraceLink]:
     return sorted(links)
 
 
-def build_trace(specs_dir: Path, index: Path, required: list[str]) -> dict:
+def build_trace(specs_dir: Path, indexes: list[Path], required: list[str]) -> dict:
     """Report linked locations; no source annotation marks verification as passed."""
-    links = _load_links(index)
+    links = sorted(link for index in indexes for link in _load_links(index))
+    keys = [(link.spec_id, link.role, link.language, link.file, link.symbol) for link in links]
+    if len(set(keys)) != len(keys):
+        raise ValueError("Duplicate trace across source indexes")
     requirements = {}
     for spec in collect_specs(specs_dir):
         if spec.id in requirements:
@@ -84,9 +87,12 @@ def build_trace(specs_dir: Path, index: Path, required: list[str]) -> dict:
             raise ValueError(f"Unknown requirement ID: {spec_id}")
         spec = requirements[spec_id]
         matches = rows.get(spec_id, [])
-        missing = _ROLES - {link.role for link in matches}
-        if missing:
-            raise ValueError(f"{spec_id}: missing trace roles: {', '.join(sorted(missing))}")
+        languages = {link.language for link in matches} or {""}
+        for language in sorted(languages):
+            missing = _ROLES - {link.role for link in matches if link.language == language}
+            if missing:
+                where = f" ({language})" if language else ""
+                raise ValueError(f"{spec_id}{where}: missing trace roles: {', '.join(sorted(missing))}")
         implementations = {
             (link.language, link.file, link.symbol) for link in matches if link.role == "implements"
         }
