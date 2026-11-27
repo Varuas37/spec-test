@@ -23,6 +23,7 @@ from .prover import (
     verify_function,
 )
 from .reporter import Reporter
+from .trace import build_trace
 from .types import SpecStatus, VerificationType
 from .verifier import SpecVerifier
 
@@ -52,6 +53,21 @@ def main(
 ):
     """spec-test: Make AI-generated code trustworthy through mathematical verification."""
     pass
+
+
+@app.command()
+def trace(
+    index: Path = typer.Option(..., "--index", help="Versioned source annotation index"),
+    specs_dir: Path = typer.Option(Path("design/specs"), "--specs"),
+    required: Optional[list[str]] = typer.Option(None, "--require", help="Required spec ID"),
+) -> None:
+    """List source links for requirements. Trace links are not verification evidence."""
+    try:
+        result = build_trace(specs_dir, index, required or [])
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(json.dumps(result, indent=2))
 
 
 @app.command()

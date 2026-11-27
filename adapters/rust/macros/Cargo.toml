@@ -1,0 +1,12 @@
+[package]
+name = "spec-test-macros"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+proc-macro = true
+
+[dependencies]
+spec-test-rust-syntax = { path = "../syntax" }
+syn = { version = "2", default-features = false, features = ["parsing", "full", "proc-macro"] }

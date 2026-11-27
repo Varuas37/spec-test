@@ -15,6 +15,7 @@ pub enum ContractError {
 
 /// Reserve a single item slot without exceeding the queue capacity.
 /// A full queue (including capacity zero) does not change state.
+#[spec_test::implements("QUEUE-001")]
 pub fn try_enqueue(len: u8, capacity: u8) -> Result<EnqueueResult, ContractError> {
     match len.cmp(&capacity) {
         core::cmp::Ordering::Greater => {
@@ -36,6 +37,7 @@ mod proofs {
     use super::{ContractError, try_enqueue};
 
     /// QUEUE-001: all u8 pairs, no narrowed assumptions, no loops or I/O.
+    #[spec_test::verifies("QUEUE-001")]
     #[kani::proof]
     fn queue_001_transition() {
         let len: u8 = kani::any();

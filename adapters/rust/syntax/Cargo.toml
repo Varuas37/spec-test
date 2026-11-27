@@ -1,0 +1,8 @@
+[package]
+name = "spec-test-rust-syntax"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+syn = { version = "2", default-features = false, features = ["parsing", "full"] }
