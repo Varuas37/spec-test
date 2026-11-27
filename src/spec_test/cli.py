@@ -607,27 +607,35 @@ def _setup_git_hooks(path: Path) -> bool:
 
 echo "Running spec-test verification..."
 
-# Try to find spec-test in common locations
+# Use the installed CLI, or a Python interpreter that can import it.
 if command -v spec-test >/dev/null 2>&1; then
-    SPEC_TEST_CMD="spec-test"
-elif command -v python3 >/dev/null 2>&1; then
-    SPEC_TEST_CMD="python3 -m spec_test.cli"
-elif command -v python >/dev/null 2>&1; then
-    SPEC_TEST_CMD="python -m spec_test.cli"
+    set -- spec-test
 else
-    echo "❌ Cannot find spec-test or python. Install spec-test first."
-    exit 1
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON=python3
+    elif command -v python >/dev/null 2>&1; then
+        PYTHON=python
+    else
+        echo "❌ Cannot find spec-test or python. Install spec-test first."
+        exit 1
+    fi
+    if ! "$PYTHON" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("spec_test") is None)'; then
+        echo "❌ spec-test is not installed for $PYTHON. Install with: $PYTHON -m pip install spec-test"
+        exit 1
+    fi
+    set -- "$PYTHON" -m spec_test.cli
 fi
 
-$SPEC_TEST_CMD verify
+"$@" verify
+verification_status=$?
 
-if [ $? -ne 0 ]; then
+if [ "$verification_status" -ne 0 ]; then
     echo ""
     echo "❌ Commit blocked: spec-test verification failed"
     echo "   - Fix failing tests"
     echo "   - Add missing tests"
     echo "   - Or skip with: git commit --no-verify"
-    exit 1
+    exit "$verification_status"
 fi
 
 echo "✅ All specs verified"
@@ -679,8 +687,8 @@ This is an example specification file. Replace with your actual specs.
 ## Requirements
 
 ### Core Features
-- **EXAMPLE-001**: The system should do something useful
-- **EXAMPLE-002**: The system should handle errors gracefully
+- **EXAMPLE-001**: A starter requirement with passing evidence is reported as passing.
+- **EXAMPLE-002**: A starter requirement without evidence is reported as missing and verification exits nonzero.
 - **EXAMPLE-003** [manual]: Code follows project naming conventions
 """)
 

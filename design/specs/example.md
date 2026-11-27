@@ -9,6 +9,6 @@ This is an example specification file. Replace with your actual specs.
 ## Requirements
 
 ### Core Features
-- **EXAMPLE-001**: The system should do something useful
-- **EXAMPLE-002**: The system should handle errors gracefully
+- **EXAMPLE-001**: A starter requirement with passing evidence is reported as passing.
+- **EXAMPLE-002**: A starter requirement without evidence is reported as missing and verification exits nonzero.
 - **EXAMPLE-003** [manual]: Code follows project naming conventions
