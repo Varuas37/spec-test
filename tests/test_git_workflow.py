@@ -340,3 +340,101 @@ def test_cli_help_documents_flag():
 
     assert "--enable-git-workflow" in Text.from_ansi(result.stdout).plain
     assert result.returncode == 0
+
+
+@pytest.fixture
+def isolated_hook_repo(tmp_path):
+    """Use a disposable repo without inherited Git templates or global config."""
+    tmp_path = tmp_path.resolve()
+    subprocess.run(["git", "-c", "init.templateDir=", "init", str(tmp_path)], check=True,
+                   capture_output=True)
+    run = run_spec_test("init", str(tmp_path), "--enable-git-workflow", capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    return tmp_path
+
+
+def run_hook(repo, path, shell="/bin/sh"):
+    return subprocess.run(
+        [shell, str(repo / ".git/hooks/pre-commit")],
+        cwd=repo, env={**os.environ, "PATH": str(path)},
+        capture_output=True, text=True,
+    )
+
+
+def executable(path, content):
+    path.write_text("#!/bin/sh\n" + content)
+    path.chmod(0o700)
+
+
+@spec("GIT-020", "Missing Python package fails closed with installation guidance")
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="POSIX hook required")
+def test_missing_spec_test_package(isolated_hook_repo):
+    import shlex
+
+    path = isolated_hook_repo / "tools"
+    path.mkdir()
+    executable(path / "python3", f'exec {shlex.quote(sys.executable)} -I -S "$@"\n')
+    result = run_hook(isolated_hook_repo, path)
+    assert result.returncode == 1
+    assert "spec-test is not installed" in result.stdout
+    assert "pip install spec-test" in result.stdout
+
+
+@spec("GIT-021", "Neither CLI nor Python on PATH fails closed")
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="POSIX hook required")
+def test_missing_cli_and_python(isolated_hook_repo):
+    path = isolated_hook_repo / "empty-path"
+    path.mkdir()
+    result = run_hook(isolated_hook_repo, path)
+    assert result.returncode == 1
+    assert "Cannot find spec-test or python" in result.stdout
+
+
+@spec("GIT-022", "The hook returns the verifier's exit code")
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="POSIX hook required")
+def test_hook_preserves_verifier_exit_code(isolated_hook_repo):
+    path = isolated_hook_repo / "tools"
+    path.mkdir()
+    executable(path / "spec-test", '[ "$1" = verify ] || exit 27\nexit 2\n')
+    assert run_hook(isolated_hook_repo, path).returncode == 2
+
+
+@spec("GIT-023", "The POSIX hook works when invoked in both supported shells")
+@pytest.mark.parametrize("shell", ["bash", "zsh"])
+def test_installed_hook_runs_with_each_shell(isolated_hook_repo, shell):
+    import shutil
+
+    shell_path = shutil.which(shell)
+    if not shell_path:
+        pytest.skip(f"{shell} unavailable")
+    path = isolated_hook_repo / "tools"
+    path.mkdir()
+    executable(path / "spec-test", '[ "$1" = verify ]\n')
+    result = run_hook(isolated_hook_repo, path, shell=shell_path)
+    assert result.returncode == 0 and "All specs verified" in result.stdout
+
+
+@spec("GIT-024", "An installer-generated hook tells the developer how to fix verification")
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="POSIX hook required")
+def test_failed_hook_prints_fix_instructions(isolated_hook_repo):
+    path = isolated_hook_repo / "tools"
+    path.mkdir()
+    executable(path / "spec-test", "exit 1\n")
+    result = run_hook(isolated_hook_repo, path)
+    assert result.returncode == 1
+    assert "Fix failing tests" in result.stdout and "Add missing tests" in result.stdout
+    assert "git commit --no-verify" in result.stdout
+
+
+@spec("GIT-032", "Replacing a hook reports where the prior hook was copied")
+def test_hook_replacement_reports_and_preserves_backup(isolated_hook_repo):
+    hook = isolated_hook_repo / ".git/hooks/pre-commit"
+    old = "#!/bin/sh\nexit 17\n"
+    hook.write_text(old)
+    run = run_spec_test(
+        "init", str(isolated_hook_repo), "--enable-git-workflow", capture_output=True, text=True
+    )
+    assert run.returncode == 0
+    assert "Backing up existing hook to pre-commit.backup" in Text.from_ansi(run.stdout).plain
+    assert hook.with_name("pre-commit.backup").read_text() == old
+    assert old != hook.read_text()
