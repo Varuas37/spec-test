@@ -26,7 +26,7 @@ struct Scanner {
     modules: Vec<String>,
     rows: Vec<Value>,
     errors: Vec<String>,
-    in_function: bool,
+    in_block: bool,
 }
 
 impl<'ast> Visit<'ast> for Scanner {
@@ -43,7 +43,7 @@ impl<'ast> Visit<'ast> for Scanner {
         let mut seen = BTreeSet::new();
         for attr in &function.attrs {
             let Some(role) = role(attr) else { continue };
-            if self.in_function {
+            if self.in_block {
                 self.visit_attribute(attr);
                 continue;
             }
@@ -62,9 +62,13 @@ impl<'ast> Visit<'ast> for Scanner {
                 Err(error) => self.errors.push(format!("line {line}: {error}")),
             }
         }
-        let was_in_function = std::mem::replace(&mut self.in_function, true);
         self.visit_block(&function.block);
-        self.in_function = was_in_function;
+    }
+
+    fn visit_block(&mut self, block: &'ast syn::Block) {
+        let was_in_block = std::mem::replace(&mut self.in_block, true);
+        syn::visit::visit_block(self, block);
+        self.in_block = was_in_block;
     }
 
     fn visit_attribute(&mut self, attr: &'ast Attribute) {
@@ -166,6 +170,9 @@ mod tests {
             "#[spec_test::verifies(\"A-1\")] struct S;",
             "fn f() { #[spec_test::verifies(\"A-1\")] fn nested() {} }",
             "struct S; impl S { #[spec_test::verifies(\"A-1\")] fn method() {} }",
+            r#"struct S; impl S { fn method() { #[spec_test::verifies("A-1")] fn local() {} } }"#,
+            r#"trait T { fn method() { #[spec_test::verifies("A-1")] fn local() {} } }"#,
+            r#"const X: () = { #[spec_test::verifies("A-1")] fn local() {} };"#,
         ] {
             assert!(scan("src/lib.rs", source).is_err(), "{source}");
         }
