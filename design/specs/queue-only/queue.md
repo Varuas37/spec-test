@@ -24,7 +24,7 @@ spec-test verify --specs design/specs/queue-only --require-issues --evidence /tm
 ### Source links
 
 - Rust implementation: [`try_enqueue`](../../../adapters/rust/src/lib.rs).
-- Rust proof: [`proofs::queue_001_transition`](../../../adapters/rust/src/lib.rs).
+- Rust proof: [`proofs::queue_001_transition`](../../../adapters/rust/src/proofs/kani.rs).
 
 The Rust attributes share the `QUEUE-001` ID with this requirement. Use
 `spec-test trace` to locate each attribute at its current line.

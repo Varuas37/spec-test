@@ -79,7 +79,7 @@ def verify_report(
         require(
             harness["pretty_name"] == HARNESS
             and harness["crate_name"] == "spec_test_rust_queue"
-            and harness["source"]["file"] == "src/lib.rs"
+            and harness["source"]["file"] == "src/proofs/kani.rs"
             and harness["attributes"]["kind"] == "Proof"
             and harness["attributes"]["should_panic"] is False,
             "incorrect Kani harness metadata",

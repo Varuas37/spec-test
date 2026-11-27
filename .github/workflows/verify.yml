@@ -27,12 +27,13 @@ jobs:
           cargo run --locked --quiet --manifest-path adapters/rust/Cargo.toml --bin verify > "$RUNNER_TEMP/rust-evidence.json"
       - name: Validate Rust source links
         run: |
+          mapfile -d '' -t sources < <(git ls-files -z -- 'adapters/rust/src/*.rs')
           cargo run --locked --quiet --manifest-path adapters/rust/Cargo.toml \
-            -p spec-test-rust-trace -- adapters/rust/src/lib.rs > "$RUNNER_TEMP/rust-trace.json"
+            -p spec-test-rust-trace -- "${sources[@]}" > "$RUNNER_TEMP/rust-trace.json"
           uv run --locked spec-test trace --specs design/specs/queue-only \
             --index "$RUNNER_TEMP/rust-trace.json" --require QUEUE-001
-      - name: Kani receipt parser and refusal tests
-        run: uv run --locked python -m unittest discover -s adapters/rust -p 'test_verify_kani.py'
+      - name: Optional proof adapter parser tests
+        run: uv run --locked python -m unittest discover -s adapters/rust -p 'test_verify_*.py'
       - name: TypeScript tests and evidence
         run: |
           npm --prefix adapters/typescript ci --no-audit --no-fund

@@ -19,15 +19,15 @@ cargo run --locked --quiet --bin verify
 The second command emits one schema-version-1 receipt on stdout. It checks the
 real `try_enqueue` implementation on all 65,536 input pairs; a failing check
 reports `failed` and the process exits nonzero. The property result is a finite
-exhaustive check, not a solver proof. The Kani row is explicitly `skipped`:
-this binary never runs Kani or upgrades that result automatically.
+exhaustive check, not a solver proof. The native runner emits only the
+checks it actually ran and knows nothing about proof engines.
 
 For opt-in implementation-proof evidence, [install and set up Kani 0.68.0](https://model-checking.github.io/kani/install-guide.html)
 first. With Python 3.11+ and that Kani installation on `PATH`, run from this
 directory:
 
 ```sh
-cargo run --locked --quiet --bin verify -- --native-only > rust.json
+cargo run --locked --quiet --bin verify > rust.json
 python verify_kani.py > kani.json
 ```
 
@@ -35,8 +35,21 @@ The producer accepts only a fresh native Kani export from this invocation:
 the exact named harness must complete successfully, its implementation checks
 must pass, and the invalid, full, and available states must all be reachable.
 It exits nonzero and emits a `failed` proof row if the check cannot be
-established. The native-only flag omits the ordinary runner's `skipped` Kani
-placeholder so both receipts can be passed to `spec-test verify` together.
+established. The harness lives in `src/proofs/kani.rs`, conditionally loaded
+only in Kani builds. Ordinary builds and the trace scanner do not require
+a Kani installation.
+
+### Use a different proof engine
+
+Keep the Rust implementation, spec ID and attribute vocabulary. Write the
+new engine's harness and a separate adapter that emits a standard version-1
+evidence receipt. Pass that receipt with `spec-test verify --evidence`; the
+consumer is shared and does not invoke or require Kani. Use the adapter's own
+`runner` name and classify the result as `implementation-proof` only when it
+checks the actual implementation. A model of the same rule is `model-proof`;
+an exhaustive finite test is `property`. Emit failed, unknown or no receipt
+when an implementation proof cannot be established. Only import receipts from
+trusted runners, since a receipt is not an attestation.
 
 The harness has no deliberate input restrictions beyond the two `u8` types
 and no loops to unwind. It invokes the same implementation, not an
@@ -64,7 +77,7 @@ From the repository root:
 
 ```sh
 cargo run --locked --quiet --manifest-path adapters/rust/Cargo.toml \
-  -p spec-test-rust-trace -- adapters/rust/src/lib.rs > /tmp/rust-trace.json
+  -p spec-test-rust-trace -- adapters/rust/src/lib.rs adapters/rust/src/proofs/kani.rs > /tmp/rust-trace.json
 spec-test trace --specs design/specs/queue-only --index /tmp/rust-trace.json \
   --require QUEUE-001
 ```
