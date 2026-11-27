@@ -251,9 +251,9 @@ def test_verify_function_boolean():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-015", "verify_function handles real numbers")
-def test_verify_function_reals():
-    """Test Z3 verification with float types."""
+@spec("Z3-073", "Unmodeled Python scalar types do not produce a proof")
+def test_float_is_not_an_exact_z3_real():
+    """IEEE float operations must not be silently modeled as mathematical reals."""
 
     @provable(spec="REAL-001")
     @contract(
@@ -264,4 +264,118 @@ def test_verify_function_reals():
         return x * x
 
     outcome = verify_function(square)
-    assert outcome.result == ProofResult.PROVEN
+    assert outcome.result == ProofResult.SKIPPED
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-080", "A real counterexample replays against the function")
+def test_counterexample_replays_and_uses_both_same_line_preconditions():
+    from spec_test.contracts import ContractError
+
+    @provable(spec="REPLAY-001")
+    @contract(
+        requires=[lambda x, y: x >= 0, lambda x, y: y >= 0],
+        ensures=[lambda result: result >= 0],
+    )
+    def subtract(x: int, y: int) -> int:
+        return x - y
+
+    outcome = verify_function(subtract)
+    assert outcome.result == ProofResult.REFUTED
+    witness = outcome.counter_example
+    assert witness is not None
+    assert witness["x"] >= 0 and witness["y"] > witness["x"]
+    with pytest.raises(ContractError) as error:
+        subtract(**witness)
+    assert error.value.condition_type == "ensures"
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-024", "All same-line postconditions use the exact lambda")
+def test_does_not_drop_the_second_postcondition_on_the_same_line():
+    @provable(spec="POST-001")
+    @contract(ensures=[lambda result: result >= 0, lambda result: result > 0])
+    def zero() -> int:
+        return 0
+
+    outcome = verify_function(zero)
+    assert outcome.result == ProofResult.REFUTED
+    assert outcome.counter_example == {}
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-134", "Contradictory assumptions cannot produce a vacuous proof")
+def test_contradictory_preconditions_are_not_proven():
+    @provable(spec="EMPTY-001")
+    @contract(requires=[lambda x: x >= 0, lambda x: x < 0], ensures=[lambda r: r >= 0])
+    def identity(x: int) -> int:
+        return x
+
+    outcome = verify_function(identity)
+    assert outcome.result == ProofResult.SKIPPED
+    assert "unsatisfiable" in outcome.message
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-132", "Any unsupported predicate makes the whole proof inconclusive")
+def test_does_not_drop_unsupported_postcondition():
+    @provable(spec="PARTIAL-001")
+    @contract(ensures=[lambda r: r >= 0, lambda r: abs(r) > 1])
+    def zero() -> int:
+        return 0
+
+    assert verify_function(zero).result == ProofResult.SKIPPED
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-023", "Ternary branches are modeled according to their Boolean predicate")
+def test_ternary_with_boolean_input():
+    @provable(spec="IF-001")
+    @contract(ensures=[lambda r: 0 <= r <= 1])
+    def bit(flag: bool) -> int:
+        return 1 if flag else 0
+
+    assert verify_function(bit).result == ProofResult.PROVEN
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@pytest.mark.parametrize("mode", ["prove", "refute", "unsupported", "empty", "duplicate"])
+@spec("Z3-100", "The real CLI imports trusted proof modules and reports outcomes")
+def test_cli_runs_proof_in_fresh_process(tmp_path, mode):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    expression = {"prove": "x + 1", "refute": "x - 1", "unsupported": "x // 1", "duplicate": "x + 1"}
+    if mode != "empty":
+        (tmp_path / "sample.py").write_text(
+            "from spec_test import contract, provable\n"
+            '@provable(spec="CLI-001")\n'
+            "@contract(requires=[lambda x: x >= 0], ensures=[lambda r: r >= 0])\n"
+            "def example(x: int) -> int:\n"
+            f"    return {expression[mode]}\n"
+        )
+    exe = Path(sys.executable).with_name("spec-test.exe" if os.name == "nt" else "spec-test")
+    if mode == "duplicate":
+        (tmp_path / "another.py").write_text((tmp_path / "sample.py").read_text())
+    command = [str(exe), "verify", "--proofs", "--fail-on-unknown"]
+    if mode == "duplicate":
+        command.extend(["--proof-module", "another"])
+    if mode != "empty":
+        command.extend(["--proof-module", "sample"])
+    run = subprocess.run(
+        command, cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(tmp_path)},
+        text=True, capture_output=True, timeout=30,
+    )
+    expected = {
+        "prove": (0, "PROVEN"),
+        "refute": (4, "REFUTED"),
+        "unsupported": (4, "SKIPPED"),
+        "empty": (4, "No proofs registered"),
+        "duplicate": (4, "Duplicate proof spec ID"),
+    }
+    code, marker = expected[mode]
+    assert (run.returncode, marker in run.stdout) == (code, True), run.stdout + run.stderr
+    if mode == "refute":
+        assert "Counter-example: {'x': 0}" in run.stdout

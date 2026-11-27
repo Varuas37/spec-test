@@ -3,9 +3,11 @@
 import ast
 import functools
 import inspect
-from dataclasses import dataclass
+import textwrap
+import time
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, TypeVar, get_type_hints
+from typing import Any, Callable, Optional, TypeVar
 
 # Try to import z3, provide helpful error if not installed
 try:
@@ -48,6 +50,7 @@ class ProvableInfo:
     timeout: int
     skip_runtime_if_proven: bool
     proof_outcome: Optional[ProofOutcome] = None
+    function: Optional[Callable] = field(default=None, repr=False, compare=False)
 
     @property
     def full_name(self) -> str:
@@ -68,15 +71,13 @@ def provable(
     """
     Decorator to mark a function for Z3 formal verification.
 
-    The function must also have @contract decorator with requires/ensures.
-    Z3 will attempt to prove that the postconditions always hold given
-    the preconditions.
+    Place this outside @contract. Z3 checks postconditions on the return
+    expression for the supported int/bool subset and declared preconditions.
 
     Args:
         spec: Optional spec ID to link this proof to
         timeout: Maximum time in seconds for Z3 to attempt proof (default: 30)
-        skip_runtime_if_proven: If True, skip runtime contract checks when
-                                the proof succeeds (default: False)
+        skip_runtime_if_proven: Reserved; proofs never disable runtime checks.
 
     Example:
         @provable(spec="MATH-001", timeout=10)
@@ -84,9 +85,12 @@ def provable(
             requires=[lambda x: x >= 0],
             ensures=[lambda result: result >= 0],
         )
-        def sqrt(x: float) -> float:
-            return x ** 0.5
+        def successor(x: int) -> int:
+            return x + 1
     """
+
+    if type(timeout) is not int or timeout < 1 or timeout > (2**32 - 1) // 1000:
+        raise ValueError("timeout must be a positive integer within the solver's limit")
 
     def decorator(func: F) -> F:
         info = ProvableInfo(
@@ -97,10 +101,6 @@ def provable(
             skip_runtime_if_proven=skip_runtime_if_proven,
         )
 
-        # Register for discovery
-        if spec:
-            _provable_registry[spec] = info
-
         # Store on function for introspection
         func._provable_info = info  # type: ignore
 
@@ -110,6 +110,11 @@ def provable(
             return func(*args, **kwargs)
 
         wrapper._provable_info = info  # type: ignore
+        info.function = wrapper
+        if spec:
+            if spec in _provable_registry:
+                raise ValueError(f"Duplicate proof spec ID: {spec}")
+            _provable_registry[spec] = info
         return wrapper  # type: ignore
 
     return decorator
@@ -166,69 +171,63 @@ def verify_function(func: Callable) -> ProofOutcome:
             message="Function has no @contract - nothing to prove",
         )
 
-    # Get type hints for creating Z3 variables
-    try:
-        hints = get_type_hints(func)
-    except Exception:
-        hints = {}
-
-    # Get function signature
-    sig = inspect.signature(func)
-
-    # Create Z3 variables for parameters
-    z3_vars = {}
-    for param_name, param in sig.parameters.items():
-        param_type = hints.get(param_name, int)  # Default to int
-        z3_var = _create_z3_variable(param_name, param_type)
-        if z3_var is not None:
-            z3_vars[param_name] = z3_var
-
-    # Create Z3 variable for result
-    return_type = hints.get("return", int)
-    result_var = _create_z3_variable("__result__", return_type)
-    if result_var is not None:
-        z3_vars["__result__"] = result_var
-
-    # Translate preconditions to Z3
-    preconditions = []
-    for req in contract_info.requires:
-        z3_expr = _translate_lambda_to_z3(req, z3_vars, sig)
-        if z3_expr is not None:
-            preconditions.append(z3_expr)
-
-    # Translate postconditions to Z3
-    postconditions = []
-    for ens in contract_info.ensures:
-        z3_expr = _translate_postcondition_to_z3(ens, z3_vars)
-        if z3_expr is not None:
-            postconditions.append(z3_expr)
-
-    if not postconditions:
-        return ProofOutcome(
-            result=ProofResult.SKIPPED,
-            function_name=provable_info.func_name,
-            spec_id=provable_info.spec_id,
-            message="Could not translate postconditions to Z3",
+    def skipped(message: str) -> ProofOutcome:
+        outcome = ProofOutcome(
+            ProofResult.SKIPPED, provable_info.spec_id, provable_info.func_name, message
         )
+        provable_info.proof_outcome = outcome
+        return outcome
+
+    if contract_info.invariants or contract_info.capture_old:
+        return skipped("Invariants and old-state contracts are not supported by proofs")
+
+    try:
+        original = _proof_body(func)
+        sig = inspect.signature(original)
+        z3_vars = {}
+        for name, param in sig.parameters.items():
+            if param.kind not in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD):
+                raise ValueError("Only positional parameters are supported")
+            z3_vars[name] = _create_z3_variable(name, param.annotation)
+        result = _translate_return(original, z3_vars)
+        expected = _create_z3_variable("expected_return_sort", sig.return_annotation)
+        if not result.sort().eq(expected.sort()):
+            raise ValueError("Return expression does not match declared type")
+
+        preconditions = [
+            _translate_predicate(cond, z3_vars, match_names=True)
+            for cond in contract_info.requires
+        ]
+        if not contract_info.ensures:
+            raise ValueError("No postconditions to prove")
+        postconditions = [
+            _translate_predicate(cond, {"result": result})
+            for cond in contract_info.ensures
+        ]
+    except (TypeError, ValueError, OSError, SyntaxError, z3.Z3Exception) as exc:
+        return skipped(f"Unsupported proof: {exc}")
 
     # Create Z3 solver
     solver = z3.Solver()
     solver.set("timeout", provable_info.timeout * 1000)  # ms
 
-    # Add preconditions as assumptions
-    for pre in preconditions:
-        solver.add(pre)
-
-    # Try to prove postconditions by checking if NOT(postcondition) is unsatisfiable
-    # If NOT(post) is UNSAT given preconditions, then postcondition always holds
-    negated_post = z3.Not(z3.And(*postconditions)) if len(postconditions) > 1 else z3.Not(postconditions[0])
-    solver.add(negated_post)
-
-    import time
-
-    start = time.time()
-    check_result = solver.check()
-    elapsed_ms = (time.time() - start) * 1000
+    solver.add(*preconditions)
+    start = time.monotonic()
+    domain = solver.check()
+    if domain == z3.unsat:
+        return skipped("Preconditions are unsatisfiable; no valid inputs")
+    if domain == z3.sat:
+        # The solver timeout is shared between the two checks.
+        remaining = provable_info.timeout * 1000 - (time.monotonic() - start) * 1000
+        if remaining >= 1:
+            solver.set("timeout", int(remaining))
+            solver.add(z3.Not(z3.And(*postconditions)))
+            check_result = solver.check()
+        else:
+            check_result = z3.unknown
+    else:
+        check_result = z3.unknown
+    elapsed_ms = (time.monotonic() - start) * 1000
 
     if check_result == z3.unsat:
         # NOT(postcondition) is unsatisfiable - proof succeeded!
@@ -247,19 +246,16 @@ def verify_function(func: Callable) -> ProofOutcome:
         model = solver.model()
         counter_example = {}
         for name, var in z3_vars.items():
-            if name != "__result__":
-                try:
-                    val = model.evaluate(var)
-                    counter_example[name] = _z3_value_to_python(val)
-                except Exception:
-                    pass
+            counter_example[name] = _z3_value_to_python(
+                model.evaluate(var, model_completion=True)
+            )
 
         outcome = ProofOutcome(
             result=ProofResult.REFUTED,
             function_name=provable_info.func_name,
             spec_id=provable_info.spec_id,
             message="Found counter-example where postcondition fails",
-            counter_example=counter_example if counter_example else None,
+            counter_example=counter_example,
             proof_time_ms=elapsed_ms,
         )
         provable_info.proof_outcome = outcome
@@ -278,102 +274,88 @@ def verify_function(func: Callable) -> ProofOutcome:
         return outcome
 
 
-def _create_z3_variable(name: str, python_type: type) -> Optional[Any]:
-    """Create a Z3 variable for a Python type."""
-    if not Z3_AVAILABLE:
-        return None
-
-    # Handle Optional types
-    origin = getattr(python_type, "__origin__", None)
-    if origin is not None:
-        # Skip complex generic types for now
-        args = getattr(python_type, "__args__", ())
-        if args:
-            python_type = args[0]  # Use inner type
-
-    if python_type == int:
+def _create_z3_variable(name: str, python_type: Any) -> Any:
+    """Model only exact Python int/bool values."""
+    if python_type is int or python_type == "int":
         return z3.Int(name)
-    elif python_type == float:
-        return z3.Real(name)
-    elif python_type == bool:
+    if python_type is bool or python_type == "bool":
         return z3.Bool(name)
-    else:
-        # Default to Int for unknown types
-        return z3.Int(name)
+    raise ValueError("Explicit int or bool annotations are required")
 
 
-def _translate_lambda_to_z3(
-    lambda_func: Callable, z3_vars: dict[str, Any], sig: inspect.Signature
-) -> Optional[Any]:
-    """Translate a lambda precondition to Z3 expression."""
-    if not Z3_AVAILABLE:
-        return None
+def _proof_body(func: Callable) -> Callable:
+    # Prove the implementation under our two decorators, not one hidden
+    # behind another decorator that might change its behavior.
+    from .contracts import contract
 
-    try:
-        # Get lambda source code via AST inspection
-        source = inspect.getsource(lambda_func)
-
-        # Parse and find the lambda
-        tree = ast.parse(source.strip())
-        lambda_node = _find_lambda(tree)
-
-        if lambda_node is None:
-            return None
-
-        # Map lambda parameter names to Z3 variables
-        param_names = list(sig.parameters.keys())
-        lambda_params = [arg.arg for arg in lambda_node.args.args]
-
-        var_mapping = {}
-        for i, lp in enumerate(lambda_params):
-            if i < len(param_names):
-                var_mapping[lp] = z3_vars.get(param_names[i])
-            elif lp in z3_vars:
-                var_mapping[lp] = z3_vars[lp]
-
-        # Translate the lambda body
-        return _ast_to_z3(lambda_node.body, var_mapping)
-
-    except Exception:
-        return None
+    runtime = getattr(func, "__wrapped__", None)
+    original = getattr(runtime, "__wrapped__", None)
+    if (
+        getattr(func, "__globals__", None) is not globals()
+        or getattr(getattr(func, "__code__", None), "co_qualname", "")
+        != "provable.<locals>.decorator.<locals>.wrapper"
+        or getattr(runtime, "__globals__", None) is not contract.__globals__
+        or getattr(getattr(runtime, "__code__", None), "co_qualname", "")
+        != "contract.<locals>.decorator.<locals>.sync_wrapper"
+        or not inspect.isfunction(original)
+        or hasattr(original, "__wrapped__")
+    ):
+        raise ValueError("Expected @provable outside a synchronous @contract")
+    return original
 
 
-def _translate_postcondition_to_z3(
-    lambda_func: Callable, z3_vars: dict[str, Any]
-) -> Optional[Any]:
-    """Translate a lambda postcondition to Z3 expression."""
-    if not Z3_AVAILABLE:
-        return None
-
-    try:
-        source = inspect.getsource(lambda_func)
-        tree = ast.parse(source.strip())
-        lambda_node = _find_lambda(tree)
-
-        if lambda_node is None:
-            return None
-
-        # Postconditions receive 'result' as first arg
-        lambda_params = [arg.arg for arg in lambda_node.args.args]
-
-        var_mapping = {}
-        if lambda_params:
-            # First param is the result
-            var_mapping[lambda_params[0]] = z3_vars.get("__result__")
-
-        # Translate the lambda body
-        return _ast_to_z3(lambda_node.body, var_mapping)
-
-    except Exception:
-        return None
+def _translate_return(func: Callable, variables: dict[str, Any]) -> Any:
+    if func.__code__.co_freevars:
+        raise ValueError("Closures are not supported")
+    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
+        raise ValueError("Expected a top-level function in the inspected source")
+    body = tree.body[0].body[:]
+    if (
+        body and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body.pop(0)
+    if len(body) != 1 or not isinstance(body[0], ast.Return) or body[0].value is None:
+        raise ValueError("Expected a single return expression")
+    result = _ast_to_z3(body[0].value, variables)
+    if result is None:
+        raise ValueError("Cannot model the return expression")
+    return result
 
 
-def _find_lambda(tree: ast.AST) -> Optional[ast.Lambda]:
-    """Find lambda node in AST."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Lambda):
-            return node
-    return None
+def _translate_predicate(
+    func: Callable, variables: dict[str, Any], *, match_names: bool = False
+) -> Any:
+    if not inspect.isfunction(func) or func.__name__ != "<lambda>" or func.__code__.co_freevars:
+        raise ValueError("Expected a lambda without captured values")
+    params = list(inspect.signature(func).parameters.values())
+    if len(params) != len(variables) or any(
+        p.kind != p.POSITIONAL_OR_KEYWORD or p.default is not p.empty for p in params
+    ):
+        raise ValueError("Predicate parameters do not match the contract")
+    if match_names and [p.name for p in params] != list(variables):
+        raise ValueError("Precondition parameter names must match the function")
+
+    # Full module source handles multiple lambdas on one line and multiline
+    # predicates. Match the actual code-object span, never the first lambda.
+    source, _ = inspect.findsource(func)
+    tree = ast.parse("".join(source))
+    spans = set(func.__code__.co_positions())
+    matches = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Lambda) and node.lineno == func.__code__.co_firstlineno
+        and (node.body.lineno, node.body.end_lineno,
+             node.body.col_offset, node.body.end_col_offset) in spans
+    ]
+    if len(matches) != 1:
+        raise ValueError("Cannot identify the exact predicate lambda")
+    mapping = {p.name: value for p, value in zip(params, variables.values())}
+    predicate = _ast_to_z3(matches[0].body, mapping)
+    if not z3.is_bool(predicate):
+        raise ValueError("Predicate must be a supported Boolean expression")
+    return predicate
 
 
 def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
@@ -391,7 +373,9 @@ def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
         current = left
         for op, comparator in zip(node.ops, node.comparators):
             right = _ast_to_z3(comparator, var_mapping)
-            if right is None:
+            if right is None or not current.sort().eq(right.sort()):
+                return None
+            if not isinstance(op, (ast.Eq, ast.NotEq)) and not z3.is_int(current):
                 return None
 
             if isinstance(op, ast.Gt):
@@ -417,7 +401,7 @@ def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
         # Handle binary operations: +, -, *, /, etc.
         left = _ast_to_z3(node.left, var_mapping)
         right = _ast_to_z3(node.right, var_mapping)
-        if left is None or right is None:
+        if not z3.is_int(left) or not z3.is_int(right):
             return None
 
         if isinstance(node.op, ast.Add):
@@ -426,12 +410,6 @@ def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
             return left - right
         elif isinstance(node.op, ast.Mult):
             return left * right
-        elif isinstance(node.op, ast.Div):
-            return left / right
-        elif isinstance(node.op, ast.FloorDiv):
-            return left / right  # Z3 Int division
-        elif isinstance(node.op, ast.Mod):
-            return left % right
         else:
             return None
 
@@ -440,16 +418,16 @@ def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
         if operand is None:
             return None
 
-        if isinstance(node.op, ast.USub):
+        if isinstance(node.op, ast.USub) and z3.is_int(operand):
             return -operand
-        elif isinstance(node.op, ast.Not):
+        elif isinstance(node.op, ast.Not) and z3.is_bool(operand):
             return z3.Not(operand)
         else:
             return None
 
     elif isinstance(node, ast.BoolOp):
         values = [_ast_to_z3(v, var_mapping) for v in node.values]
-        if any(v is None for v in values):
+        if not all(z3.is_bool(v) for v in values):
             return None
 
         if isinstance(node.op, ast.And):
@@ -469,8 +447,6 @@ def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
             return z3.BoolVal(node.value)
         elif isinstance(node.value, int):
             return z3.IntVal(node.value)
-        elif isinstance(node.value, float):
-            return z3.RealVal(node.value)
         else:
             return None
 
@@ -479,7 +455,8 @@ def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
         test = _ast_to_z3(node.test, var_mapping)
         body = _ast_to_z3(node.body, var_mapping)
         orelse = _ast_to_z3(node.orelse, var_mapping)
-        if test is None or body is None or orelse is None:
+        if (not z3.is_bool(test) or body is None or orelse is None
+            or not body.sort().eq(orelse.sort())):
             return None
         return z3.If(test, body, orelse)
 

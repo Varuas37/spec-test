@@ -7,6 +7,26 @@ Z3 integration enables formal verification of contracts using SMT solving, provi
 
 ---
 
+## Implemented subset vs. planned requirements
+
+The requirements below are the original roadmap, not a statement of current
+capabilities. The initial implementation checks a synchronous, single-return
+function over exact Python `int` and `bool` values, with optional literal
+docstring and direct lambda pre/postconditions. It rejects partial translation
+and unsatisfiable preconditions, keeps runtime contracts active, and returns
+concrete input values on refutation. It does not treat Python floats as Z3 Reals,
+nor model division, loops, arrays, optional values, captures, calls, or
+invariants. There is no proof cache. Do not use bounded recursive unrolling as
+evidence of an unbounded proof.
+
+`verify --proofs --proof-module PACKAGE.MODULE` imports an explicit trusted
+module to discover spec-ID proofs; repeat the option for multiple modules.
+Missing Z3, failure to import, empty proof runs, and refutations exit with code
+4 (code 3 is already used for test coverage). With `--fail-on-unknown` either
+unknown or skipped proofs also exit with code 4. Normal test and coverage
+failures retain their existing exit codes. Proof output is still separate
+from the spec coverage report.
+
 ## Overview
 
 Z3 is an SMT (Satisfiability Modulo Theories) solver that can mathematically prove properties about code. This feature translates Python contracts (preconditions/postconditions) into Z3 constraints and attempts to prove they always hold.

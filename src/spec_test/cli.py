@@ -4,7 +4,7 @@ import shutil
 import stat
 import subprocess
 import sys
-from importlib import resources
+from importlib import import_module, resources
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +16,7 @@ from . import __version__
 from .collector import collect_specs
 from .prover import (
     ProofResult,
+    Z3_AVAILABLE,
     get_provable_registry,
     verify_function,
 )
@@ -103,6 +104,12 @@ def verify(
         "-p",
         help="Run Z3 formal proof verification on @provable functions",
     ),
+    proof_module: Optional[list[str]] = typer.Option(
+        None, "--proof-module", help="Import a trusted module containing proofs (repeatable)"
+    ),
+    fail_on_unknown: bool = typer.Option(
+        False, "--fail-on-unknown", help="Fail if any requested proof is unknown or skipped"
+    ),
 ):
     """
     Verify all specifications have passing tests.
@@ -110,6 +117,22 @@ def verify(
     Reads specs from markdown files, discovers @spec decorated tests,
     runs tests, and reports spec coverage. Optionally checks code coverage.
     """
+    if not proofs and (proof_module or fail_on_unknown):
+        raise typer.BadParameter("Proof options require --proofs")
+    if proofs:
+        if not Z3_AVAILABLE:
+            console.print("Z3 is not installed. Install with: pip install 'spec-test[z3]'")
+            raise typer.Exit(code=4)
+        for module_name in proof_module or []:
+            try:
+                import_module(module_name)
+            except Exception as exc:
+                console.print(f"Cannot import proof module {module_name}: {exc}", markup=False)
+                raise typer.Exit(code=4) from exc
+        if not get_provable_registry():
+            console.print("No proofs registered. Use --proof-module with an importable module.")
+            raise typer.Exit(code=4)
+
     verifier = SpecVerifier(
         specs_dir=specs_dir,
         tests_dir=tests_dir,
@@ -137,7 +160,9 @@ def verify(
     proof_failures = 0
     if proofs:
         proof_results = _run_proofs(verbose)
-        proof_failures = proof_results.get("refuted", 0)
+        proof_failures = proof_results["refuted"]
+        if fail_on_unknown:
+            proof_failures += proof_results["unknown"] + proof_results["skipped"]
 
     if output:
         reporter.generate_markdown(report, output)
@@ -173,12 +198,8 @@ def _run_proofs(verbose: bool) -> dict[str, int]:
     console.print()
 
     for spec_id, info in registry.items():
-        # Try to get the actual function to verify
-        # We need to import the module and get the function
         try:
-            import importlib
-            module = importlib.import_module(info.func_module)
-            func = getattr(module, info.func_name, None)
+            func = info.function
 
             if func is None:
                 outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, "Function not found"))
@@ -192,9 +213,8 @@ def _run_proofs(verbose: bool) -> dict[str, int]:
             results[key] = results.get(key, 0) + 1
 
             # Show counter-example if refuted
-            if outcome.result == ProofResult.REFUTED and outcome.counter_example:
-                if verbose:
-                    console.print(f"  Counter-example: {outcome.counter_example}")
+            if outcome.result == ProofResult.REFUTED and outcome.counter_example is not None:
+                console.print(f"  Counter-example: {outcome.counter_example}", markup=False)
 
         except Exception as e:
             outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, str(e)))
@@ -212,11 +232,10 @@ def _run_proofs(verbose: bool) -> dict[str, int]:
             status = "[dim]○ SKIPPED[/dim]"
 
         console.print(f"  {status} {spec_id}: {func_name}")
-        if verbose and message:
-            console.print(f"    [dim]{message}[/dim]")
+        if message and (verbose or result != ProofResult.PROVEN):
+            console.print(f"    {message}", markup=False, style="dim")
 
     # Summary panel
-    total = sum(results.values())
     summary = f"Proven: {results['proven']} | Refuted: {results['refuted']} | Unknown: {results['unknown']} | Skipped: {results['skipped']}"
 
     if results["refuted"] > 0:

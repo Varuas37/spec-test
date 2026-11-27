@@ -26,7 +26,7 @@ You cannot keep up. And the code AI generates is often correct, but *how do you 
 
 **Shift review from CODE to SPECS.**
 
-Specs are 10x smaller than implementations. If your specs are correct and verification passes, the code is correct by definition.
+Specs are 10x smaller than implementations. Passing verification provides evidence for each checked requirement. It does not cover requirements, code paths, or runtime behavior that the checks do not model.
 
 ```
                          +------------------+
@@ -285,6 +285,7 @@ pip install spec-test[z3]
 ```
 
 ```python
+# my_package/proofs.py (must be importable)
 from spec_test import provable, contract
 
 @provable(spec="MATH-001")
@@ -297,13 +298,22 @@ def add_positive(x: int, y: int) -> int:
 ```
 
 ```bash
-$ spec-test verify --proofs
+$ spec-test verify --proofs --proof-module my_package.proofs --fail-on-unknown
 
 ╭─────────────────────────────────────╮
 │   Proof Verification Summary        │
 ╰─────────────────────────────────────╯
-Proven: 1 | Refuted: 0 | Unknown: 0
+Proven: 1 | Refuted: 0 | Unknown: 0 | Skipped: 0
 ```
+
+The initial proof subset is a single return expression over explicit Python
+`int` and `bool` values, including arithmetic (`+`, `-`, `*`), comparisons,
+Boolean logic, and ternaries. Z3 checks the actual modeled return against every
+postcondition, under every precondition. Unsupported code or predicates and
+contradictory preconditions never count as proved. A refutation prints the input
+values. Runtime checks remain on. Use `--fail-on-unknown` in CI to reject skipped
+and unknown proofs as well as refutations. Only import proof modules you trust:
+they run normal Python import code.
 
 ## For AI Agents
 
@@ -355,7 +365,7 @@ Installs skills to `.claude/skills/`:
 
 ```bash
 spec-test verify              # Verify all specs have passing tests
-spec-test verify --proofs     # Include Z3 formal proof verification
+spec-test verify --proofs --proof-module my_package.proofs --fail-on-unknown
 spec-test verify --coverage   # Include code coverage analysis
 spec-test list-specs          # List all specifications
 spec-test list-specs -i       # Show related issues for each spec
@@ -371,7 +381,8 @@ spec-test context             # Output CLAUDE.md for LLM context
 - [x] Spec-to-test linking with `@spec` decorator
 - [x] Runtime contracts with `@contract` (requires/ensures/invariants)
 - [x] `old()` support for comparing pre/post state
-- [x] Z3 formal proof verification with `@provable`
+- [x] Z3 proofs for single-return integer/Boolean functions
+- [ ] Broader proof support and per-spec proof evidence in the main report
 - [x] Issues-first workflow with `design/` structure
 - [x] AI agent skills
 - [ ] Hypothesis property testing integration
