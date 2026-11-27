@@ -140,7 +140,8 @@ def discover(root: Path) -> Plan:
                 for key in ("dependencies", "devDependencies", "peerDependencies")
             )
             language = "typescript" if typescript else "javascript"
-            checks.append(Check(language, language, ".", [manager, "test"]))
+            argv = [manager, "run", "test"] if manager == "bun" else [manager, "test"]
+            checks.append(Check(language, language, ".", argv))
 
     if not checks:
         notes.append(f"No unambiguous test commands found; add {CONFIG} for this project.")

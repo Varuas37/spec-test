@@ -107,3 +107,17 @@ def test_missing_executable_does_not_pass(tmp_path):
     result = CliRunner().invoke(app, ["run-checks", "--root", str(tmp_path), "--trust-repo"])
     assert result.exit_code == 1
     assert "[check-0] failed" in result.stdout
+
+
+@pytest.mark.parametrize("manifest_manager", [True, False])
+def test_bun_uses_package_script_not_the_builtin_test_runner(tmp_path, manifest_manager):
+    package = {"scripts": {"test": "custom-vitest-check"}}
+    if manifest_manager:
+        package["packageManager"] = "bun@1.3.0"
+    else:
+        (tmp_path / "bun.lock").touch()
+    (tmp_path / "package.json").write_text(json.dumps(package))
+    result = CliRunner().invoke(app, ["plan", "--root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    [check] = json.loads(result.stdout)["checks"]
+    assert check["argv"] == ["bun", "run", "test"]
