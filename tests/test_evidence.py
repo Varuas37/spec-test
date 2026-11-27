@@ -131,3 +131,16 @@ def test_even(value: int):
     assert report.passing == 1
     check, = report.evidence
     assert check.kind == "property" and check.status == "passed"
+
+
+@spec("EVID-007", "Specs and runner receipts accept prefixes such as Z3")
+def test_numbered_prefix_cannot_hide_the_proof_roadmap(tmp_path):
+    specs, tests, _ = subject(tmp_path, "**Z3-901** [provable]: A bound\n")
+    report = SpecVerifier(specs, tests).verify()
+    assert report.total_specs == report.missing == 1
+    assert report.results[0].spec.id == "Z3-901"
+    p = tmp_path / "evidence.json"
+    row = dict(spec_id="Z3-901", kind="implementation-proof", runner="demo", name="bound", status="passed")
+    p.write_text(json.dumps({"schema_version": 1, "checks": [row]}))
+    args = ["verify", "-s", str(specs), "-t", str(tests), "--evidence", str(p)]
+    assert CliRunner().invoke(app, args).exit_code == 0

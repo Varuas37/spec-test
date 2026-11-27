@@ -36,7 +36,7 @@ def property_test(
     required generated parameters. Write the property as a test that calls
     the implementation, not as a decorator on the implementation itself.
     """
-    if not isinstance(spec_id, str) or not re.fullmatch(r"[A-Z]+-[0-9]+", spec_id):
+    if not isinstance(spec_id, str) or not re.fullmatch(r"[A-Z][A-Z0-9]*-[0-9]+", spec_id):
         raise PropertyConfigurationError("spec_id must look like QUEUE-001")
     if description is not None and (
         not isinstance(description, str) or not description.strip()

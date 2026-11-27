@@ -2,7 +2,7 @@
 
 import pytest
 
-from spec_test import spec
+from spec_test import spec, specs
 from spec_test.contracts import contract
 from spec_test.prover import (
     ProofOutcome,
@@ -42,7 +42,7 @@ def test_provable_decorator_registers():
     assert registry["TEST-001"].func_name == "test_func"
 
 
-@spec("Z3-002", "@provable stores info on function")
+@spec("Z3-003", "@provable stores info on function")
 def test_provable_stores_info_on_function():
     """Test that @provable stores ProvableInfo on the function."""
 
@@ -58,7 +58,6 @@ def test_provable_stores_info_on_function():
     assert info.timeout == 60
 
 
-@spec("Z3-003", "get_provable_for_spec retrieves by ID")
 def test_get_provable_for_spec():
     """Test retrieving provable info by spec ID."""
 
@@ -75,11 +74,10 @@ def test_get_provable_for_spec():
     assert get_provable_for_spec("NONEXISTENT") is None
 
 
-@spec("Z3-004", "verify_function skips without Z3")
-def test_verify_function_skips_without_z3():
-    """Test that verify_function gracefully handles missing Z3."""
-    if Z3_AVAILABLE:
-        pytest.skip("Z3 is available, skipping no-Z3 test")
+@spec("Z3-130", "verify_function skips without Z3")
+def test_verify_function_skips_without_z3(monkeypatch):
+    """Exercise the no-solver entry point in either test environment."""
+    monkeypatch.setattr("spec_test.prover.Z3_AVAILABLE", False)
 
     @provable(spec="SKIP-001")
     @contract(ensures=[lambda r: r >= 0])
@@ -92,7 +90,6 @@ def test_verify_function_skips_without_z3():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-005", "verify_function requires @provable")
 def test_verify_function_requires_provable():
     """Test that verify_function skips functions without @provable."""
 
@@ -105,7 +102,6 @@ def test_verify_function_requires_provable():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-006", "verify_function requires @contract")
 def test_verify_function_requires_contract():
     """Test that verify_function skips functions without @contract."""
 
@@ -119,7 +115,7 @@ def test_verify_function_requires_contract():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-007", "verify_function proves simple postcondition")
+@spec("Z3-070", "verify_function proves simple postcondition")
 def test_verify_function_proves_simple():
     """Test that verify_function can prove simple postconditions."""
 
@@ -137,7 +133,7 @@ def test_verify_function_proves_simple():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-008", "verify_function refutes invalid postcondition")
+@spec("Z3-071", "verify_function refutes invalid postcondition")
 def test_verify_function_refutes_invalid():
     """Test that verify_function finds counter-examples."""
 
@@ -155,7 +151,7 @@ def test_verify_function_refutes_invalid():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-009", "verify_function handles arithmetic postconditions")
+@spec("Z3-030", "verify_function handles arithmetic postconditions")
 def test_verify_function_arithmetic():
     """Test Z3 verification with arithmetic postconditions."""
 
@@ -172,7 +168,7 @@ def test_verify_function_arithmetic():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-010", "verify_function handles comparison chains")
+@spec("Z3-021", "verify_function handles comparison chains")
 def test_verify_function_comparisons():
     """Test Z3 verification with comparison chains."""
 
@@ -188,7 +184,6 @@ def test_verify_function_comparisons():
     assert outcome.result == ProofResult.PROVEN
 
 
-@spec("Z3-011", "ProofOutcome contains timing info")
 def test_proof_outcome_has_timing():
     """Test that ProofOutcome includes proof_time_ms."""
     outcome = ProofOutcome(
@@ -199,7 +194,6 @@ def test_proof_outcome_has_timing():
     assert outcome.proof_time_ms == 42.5
 
 
-@spec("Z3-012", "ProvableInfo.full_name combines module and func")
 def test_provable_info_full_name():
     """Test that ProvableInfo.full_name works correctly."""
     info = ProvableInfo(
@@ -212,7 +206,6 @@ def test_provable_info_full_name():
     assert info.full_name == "my_module.my_func"
 
 
-@spec("Z3-013", "clear_provable_registry clears all entries")
 def test_clear_registry():
     """Test that clear_provable_registry removes all entries."""
 
@@ -234,7 +227,7 @@ def test_clear_registry():
 
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
-@spec("Z3-014", "verify_function handles boolean operations")
+@spec("Z3-022", "verify_function handles boolean operations")
 def test_verify_function_boolean():
     """Test Z3 verification with boolean operations in conditions."""
 
@@ -340,7 +333,7 @@ def test_ternary_with_boolean_input():
 
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
 @pytest.mark.parametrize("mode", ["prove", "refute", "unsupported", "empty", "duplicate"])
-@spec("Z3-100", "The real CLI imports trusted proof modules and reports outcomes")
+@specs("Z3-100", "Z3-103")
 def test_cli_runs_proof_in_fresh_process(tmp_path, mode):
     import os
     import subprocess

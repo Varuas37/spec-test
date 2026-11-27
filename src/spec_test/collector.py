@@ -11,7 +11,7 @@ from .types import RelatedIssue, SpecRequirement, VerificationType
 # Or with tags: **SPEC-001** [SKIP]: Description
 # Or with multiple tags: **SPEC-001** [manual] [SKIP]: Description
 SPEC_PATTERN = re.compile(
-    r"\*\*([A-Z]+-\d+)\*\*"  # **SPEC-001**
+    r"\*\*([A-Z][A-Z0-9]*-\d+)\*\*"  # **SPEC-001**
     r"((?:\s*\[\w+\])*)"  # Optional tags like [manual] [SKIP]
     r":\s*(.+?)$",  # : Description
     re.MULTILINE,

@@ -42,7 +42,7 @@ def load_evidence(path: Path) -> list[Evidence]:
         ):
             raise ValueError(f"{path}: invalid evidence check")
         if (
-            not re.fullmatch(r"[A-Z]+-\d+", row["spec_id"])
+            not re.fullmatch(r"[A-Z][A-Z0-9]*-\d+", row["spec_id"])
             or row["kind"] not in KINDS
             or row["status"] not in STATUSES
         ):
