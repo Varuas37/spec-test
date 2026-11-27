@@ -1,9 +1,11 @@
 """Run tests and collect results."""
 
 import ast
+import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -21,73 +23,52 @@ def discover_spec_tests(tests_dir: str | Path) -> dict[str, SpecTest]:
     if not tests_path.exists():
         return {}
 
-    return _discover_from_files(tests_path)
+    return {key: group[0] for key, group in discover_spec_test_groups(tests_path).items()}
 
 
-def _discover_from_files(tests_dir: Path) -> dict[str, SpecTest]:
-    """Parse test files to find @spec decorators."""
-    spec_tests: dict[str, SpecTest] = {}
-
-    for py_file in tests_dir.glob("**/*.py"):
-        if py_file.name.startswith("__"):
+def discover_spec_test_groups(tests_dir: str | Path) -> dict[str, list[SpecTest]]:
+    """Discover every linked test, preserving repeated spec IDs."""
+    groups: dict[str, list[SpecTest]] = {}
+    for file in sorted(Path(tests_dir).glob("**/*.py")):
+        if file.name.startswith("__"):
             continue
-
         try:
-            tree = ast.parse(py_file.read_text())
+            tree = ast.parse(file.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
-
-        # Process top-level functions
         for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                spec_info = _extract_spec_decorator(node)
-                if spec_info:
-                    spec_id, description = spec_info
-                    test_path = f"{py_file}::{node.name}"
-                    spec_tests[spec_id] = SpecTest(
-                        spec_id=spec_id,
-                        description=description,
-                        test_path=test_path,
-                        test_file=py_file,
-                        test_line=node.lineno,
+            scope = node.body if isinstance(node, ast.ClassDef) else [node]
+            for item in scope:
+                if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                prefix = f"{node.name}::" if isinstance(node, ast.ClassDef) else ""
+                for spec_id, description, evidence_kind in _spec_decorators(item):
+                    test = SpecTest(
+                        spec_id, description, f"{file}::{prefix}{item.name}", file,
+                        item.lineno, evidence_kind,
                     )
-
-            # Process methods inside classes
-            elif isinstance(node, ast.ClassDef):
-                class_name = node.name
-                for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        spec_info = _extract_spec_decorator(item)
-                        if spec_info:
-                            spec_id, description = spec_info
-                            # pytest format: file.py::ClassName::method_name
-                            test_path = f"{py_file}::{class_name}::{item.name}"
-                            spec_tests[spec_id] = SpecTest(
-                                spec_id=spec_id,
-                                description=description,
-                                test_path=test_path,
-                                test_file=py_file,
-                                test_line=item.lineno,
-                            )
-
-    return spec_tests
+                    groups.setdefault(spec_id, []).append(test)
+    return groups
 
 
-def _extract_spec_decorator(
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> Optional[tuple[str, str]]:
-    """Extract @spec decorator info from a function node."""
+def _spec_decorators(node):
     for decorator in node.decorator_list:
-        if isinstance(decorator, ast.Call):
-            func = decorator.func
-            if isinstance(func, ast.Name) and func.id == "spec":
-                args = decorator.args
-                if len(args) >= 2:
-                    spec_id = _get_string_value(args[0])
-                    description = _get_string_value(args[1])
-                    if spec_id and description:
-                        return (spec_id, description)
-    return None
+        if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Name):
+            continue
+        name = decorator.func.id
+        if name == "specs":
+            for value in decorator.args:
+                if spec_id := _get_string_value(value):
+                    yield spec_id, node.name, "test"
+            continue
+        if name not in {"spec", "property_test"}:
+            continue
+        args = decorator.args
+        kw = {arg.arg: arg.value for arg in decorator.keywords}
+        spec_id = _get_string_value(args[0] if args else kw.get("spec_id"))
+        description = _get_string_value(args[1] if len(args) > 1 else kw.get("description"))
+        if spec_id and (description or name == "property_test"):
+            yield spec_id, description or node.name, "property" if name == "property_test" else "test"
 
 
 def _get_string_value(node: ast.expr) -> Optional[str]:
@@ -110,165 +91,61 @@ def _get_env_with_pythonpath() -> dict[str, str]:
 
 
 def run_test(test_path: str, tests_dir: Path) -> tuple[bool, Optional[str]]:
-    """
-    Run a specific test and return pass/fail status.
-
-    Returns:
-        Tuple of (passed: bool, error_message: Optional[str])
-    """
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            test_path,
-            "-v",
-            "--tb=short",
-            "--no-header",
-            "-p",
-            "no:spec_test",  # Disable our plugin to avoid recursion
-        ],
-        capture_output=True,
-        text=True,
-        cwd=Path.cwd(),
-        env=_get_env_with_pythonpath(),
-    )
-
-    passed = result.returncode == 0
-    error_message = None if passed else result.stdout + result.stderr
-
-    return passed, error_message
+    """Compatibility wrapper for callers that need a pass/fail result."""
+    return run_tests_batch([test_path], tests_dir)[test_path]
 
 
 def run_tests_batch(test_paths: list[str], tests_dir: Path) -> dict[str, tuple[bool, Optional[str]]]:
-    """
-    Run multiple tests in a single pytest invocation for performance.
+    return {
+        path: (status == "passed", detail)
+        for path, (status, detail) in run_test_receipts(test_paths).items()
+    }
 
-    Returns:
-        Dict mapping test_path -> (passed, error_message)
-    """
-    if not test_paths:
+
+def _node_key(node_id: str, root: Path) -> tuple[Path, str]:
+    file, _, nodes = node_id.partition("::")
+    return (root / file).resolve(), nodes.split("[", 1)[0]
+
+
+def run_test_receipts(test_paths: list[str]) -> dict[str, tuple[str, Optional[str]]]:
+    paths = list(dict.fromkeys(test_paths))
+    if not paths:
         return {}
+    with tempfile.TemporaryDirectory() as directory:
+        receipt = Path(directory) / "pytest.json"
+        proc = subprocess.run(
+            [
+                sys.executable, "-m", "pytest", *paths, "-q", "--tb=line",
+                "-p", "no:spec_test", "-p", "spec_test.pytest_receipt",
+                "--spec-test-receipt", str(receipt),
+            ],
+            capture_output=True, text=True, env=_get_env_with_pythonpath(),
+        )
+        if not receipt.is_file() or proc.returncode not in (0, 1):
+            reason = (proc.stderr or proc.stdout).strip()[-1000:]
+            return {path: ("unknown", reason or "pytest did not finish") for path in paths}
+        data = json.loads(receipt.read_text(encoding="utf-8"))
 
-    # Run all tests in a single pytest invocation
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            *test_paths,
-            "-v",
-            "--tb=line",  # Shorter output for batch runs
-            "--no-header",
-            "-p",
-            "no:spec_test",  # Disable our plugin to avoid recursion
-        ],
-        capture_output=True,
-        text=True,
-        cwd=Path.cwd(),
-        env=_get_env_with_pythonpath(),
-    )
+    cases: dict[tuple[Path, str], list[str]] = {}
+    for node_id, stages in data["tests"].items():
+        key = _node_key(node_id, Path(data["root"]))
+        if any(outcome == "failed" for _, outcome, _ in stages):
+            state = "failed"
+        elif any(outcome == "skipped" or xfail for _, outcome, xfail in stages):
+            state = "skipped"
+        elif {phase for phase, outcome, _ in stages if outcome == "passed"} == {
+            "setup", "call", "teardown"
+        }:
+            state = "passed"
+        else:
+            state = "unknown"
+        cases.setdefault(key, []).append(state)
 
-    # Parse pytest output to extract per-test results
-    results: dict[str, tuple[bool, Optional[str]]] = {}
-
-    # Parse the output - look for test result lines
-    output = result.stdout + result.stderr
-    lines = output.split('\n')
-
-    for line in lines:
-        # Match pytest verbose output: "test_file.py::test_name PASSED" or "FAILED"
-        # Example: "tests/test_contracts.py::test_contract_validates_preconditions PASSED    [ 50%]"
-        if '::' in line:
-            # Check for status keywords
-            status_found = None
-            for status_keyword in ['PASSED', 'FAILED', 'ERROR', 'SKIPPED']:
-                if status_keyword in line:
-                    status_found = status_keyword
-                    break
-
-            if status_found:
-                # Extract test identifier (everything before the status)
-                # Split on whitespace and get the first part
-                parts = line.split()
-                if len(parts) >= 2:
-                    test_identifier = parts[0]
-
-                    # Match against our test paths
-                    # pytest outputs can be relative (with ../ prefix) or absolute
-                    # Our test_paths are typically absolute
-                    for test_path in test_paths:
-                        # Normalize both paths by resolving them and comparing
-                        # Split into file path and test node (::test_name)
-                        test_path_parts = test_path.split('::')
-                        test_id_parts = test_identifier.split('::')
-
-                        # Match if the test nodes (after ::) match
-                        # and the file paths resolve to the same file
-                        matches = False
-
-                        if test_path == test_identifier:
-                            # Exact match
-                            matches = True
-                        elif len(test_path_parts) == len(test_id_parts) and test_path_parts[1:] == test_id_parts[1:]:
-                            # Test nodes match, now check if file paths point to same file
-                            try:
-                                # Normalize the pytest output path (might have ../ prefix)
-                                # by resolving it from current working directory
-                                test_id_file = Path(test_id_parts[0]).resolve()
-                                test_path_file = Path(test_path_parts[0]).resolve()
-
-                                if test_id_file == test_path_file:
-                                    matches = True
-                            except (ValueError, OSError):
-                                # If path resolution fails, fall back to string matching
-                                if test_path_parts[0].endswith(test_id_parts[0]) or test_id_parts[0].endswith(test_path_parts[0]):
-                                    matches = True
-
-                        if matches:
-                            if status_found in ['PASSED']:
-                                results[test_path] = (True, None)
-                            elif status_found in ['FAILED']:
-                                # Extract error from subsequent lines (simplified)
-                                error_msg = f"Test failed: {test_identifier}"
-                                results[test_path] = (False, error_msg)
-                            elif status_found in ['ERROR']:
-                                error_msg = f"Test error: {test_identifier}"
-                                results[test_path] = (False, error_msg)
-                            elif status_found in ['SKIPPED']:
-                                results[test_path] = (True, None)  # Treat skipped as passing for spec purposes
-                            break
-
-    # Mark any tests that didn't appear in output as failed
-    for test_path in test_paths:
-        if test_path not in results:
-            results[test_path] = (False, "Test did not run or was not found")
-
+    results = {}
+    for path in paths:
+        observed = cases.get(_node_key(path, Path.cwd()), [])
+        state = next(
+            (s for s in ("failed", "unknown", "skipped", "passed") if s in observed), "unknown"
+        )
+        results[path] = (state, None if state == "passed" else f"pytest evidence {state}: {path}")
     return results
-
-
-def run_tests_by_spec_id(spec_id: str, tests_dir: Path) -> tuple[bool, Optional[str]]:
-    """Run all tests for a given spec ID."""
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(tests_dir),
-            "-v",
-            "-m",
-            f"spec_id({spec_id})",
-            "--tb=short",
-            "-p",
-            "no:spec_test",  # Disable our plugin to avoid recursion
-        ],
-        capture_output=True,
-        text=True,
-        cwd=Path.cwd(),
-        env=_get_env_with_pythonpath(),
-    )
-
-    passed = result.returncode == 0
-    error_message = None if passed else result.stdout + result.stderr
-
-    return passed, error_message

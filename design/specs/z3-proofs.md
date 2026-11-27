@@ -24,8 +24,9 @@ module to discover spec-ID proofs; repeat the option for multiple modules.
 Missing Z3, failure to import, empty proof runs, and refutations exit with code
 4 (code 3 is already used for test coverage). With `--fail-on-unknown` either
 unknown or skipped proofs also exit with code 4. Normal test and coverage
-failures retain their existing exit codes. Proof output is still separate
-from the spec coverage report.
+failures retain their documented exit codes. Each proof linked to a spec ID is
+included in the report and JSON evidence. Only implementation proof evidence
+can satisfy a `[provable]` requirement.
 
 ## Overview
 

@@ -9,6 +9,7 @@ from .contracts import (
     get_contract_registry,
 )
 from .decorators import get_spec_registry, spec, specs
+from .property_testing import PropertyConfigurationError, StrategyGenerationError, property_test
 from .prover import (
     ProofOutcome,
     ProofResult,
@@ -38,6 +39,9 @@ __all__ = [
     "spec",
     "specs",
     "get_spec_registry",
+    "property_test",
+    "StrategyGenerationError",
+    "PropertyConfigurationError",
     # Contracts
     "contract",
     "ContractError",

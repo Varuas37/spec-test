@@ -1,25 +1,18 @@
-"""Main verification logic."""
+"""Reconcile actual runner evidence with written specifications."""
 
 from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .collector import collect_specs
-from .runner import discover_spec_tests, run_test, run_tests_batch
-from .types import (
-    SpecRequirement,
-    SpecResult,
-    SpecStatus,
-    SpecTest,
-    VerificationReport,
-    VerificationType,
-)
+from .evidence import Evidence, require_unique
+from .runner import discover_spec_test_groups, run_test_receipts
+from .types import SpecRequirement, SpecResult, SpecStatus, VerificationReport, VerificationType
 
 
 class SpecVerifier:
-    """Main class for verifying specifications against tests."""
+    """Verify each requirement using its declared kind of evidence."""
 
     def __init__(
         self,
@@ -32,149 +25,51 @@ class SpecVerifier:
         self.project_root = project_root or Path.cwd()
         self.console = Console()
 
-    def verify(self, verbose: bool = False) -> VerificationReport:
-        """
-        Run full verification of all specs.
-
-        Returns:
-            VerificationReport with all results
-        """
-        # Collect specs from markdown
+    def verify(self, verbose: bool = False, evidence: tuple[Evidence, ...] = ()) -> VerificationReport:
         specs = collect_specs(self.specs_dir)
-
         if not specs:
             self.console.print("[yellow]No specifications found[/yellow]")
-            return VerificationReport(results=[])
+        return self._verify(specs, evidence)
 
-        # Discover tests
-        spec_tests = discover_spec_tests(self.tests_dir)
+    def _verify(self, specs: list[SpecRequirement], evidence: tuple[Evidence, ...]):
+        groups = discover_spec_test_groups(self.tests_dir)
+        eligible = {
+            spec.id
+            for spec in specs
+            if spec.verification_type not in {VerificationType.SKIP, VerificationType.MANUAL}
+        }
+        outcomes = run_test_receipts([test.test_path for id in eligible for test in groups.get(id, [])])
+        checks = list(evidence)
+        for id in sorted(eligible):
+            for test in groups.get(id, []):
+                status, details = outcomes[test.test_path]
+                checks.append(Evidence(id, test.evidence_kind, "pytest", test.test_path, status, details))
+        require_unique(checks)
+        by_id: dict[str, list[Evidence]] = {}
+        for check in checks:
+            by_id.setdefault(check.spec_id, []).append(check)
 
-        # Build list of specs that need testing (skip SKIP and MANUAL)
-        specs_to_test = [
-            spec for spec in specs
-            if spec.verification_type not in [VerificationType.SKIP, VerificationType.MANUAL]
-            and spec.id in spec_tests
-        ]
-
-        # Batch run all tests in a single pytest invocation for performance
-        test_results = {}
-        if specs_to_test:
-            test_paths = [spec_tests[spec.id].test_path for spec in specs_to_test]
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=self.console,
-                transient=True,
-            ) as progress:
-                progress.add_task("Running tests...", total=None)
-                test_results = run_tests_batch(test_paths, self.tests_dir)
-
-        # Map results back to specs
-        results: list[SpecResult] = []
+        results = []
         for spec in specs:
-            result = self._verify_spec_with_cache(spec, spec_tests, test_results, verbose)
-            results.append(result)
-
-        return VerificationReport(results=results)
-
-    def _verify_spec(
-        self,
-        spec: SpecRequirement,
-        spec_tests: dict[str, SpecTest],
-        verbose: bool,
-    ) -> SpecResult:
-        """Verify a single specification (used for single-spec verification)."""
-
-        # Handle SKIP verification type
-        if spec.verification_type == VerificationType.SKIP:
-            return SpecResult(
-                spec=spec,
-                status=SpecStatus.SKIPPED,
-                error_message="Skipped",
-            )
-
-        # Handle manual verification type
-        if spec.verification_type == VerificationType.MANUAL:
-            return SpecResult(
-                spec=spec,
-                status=SpecStatus.SKIPPED,
-                error_message="Manual verification required",
-            )
-
-        # Standard test verification
-        if spec.id not in spec_tests:
-            return SpecResult(
-                spec=spec,
-                status=SpecStatus.PENDING,
-                error_message=f"No test found for {spec.id}",
-            )
-
-        test = spec_tests[spec.id]
-        passed, error = run_test(test.test_path, self.tests_dir)
-
-        return SpecResult(
-            spec=spec,
-            status=SpecStatus.PASSING if passed else SpecStatus.FAILING,
-            test=test,
-            error_message=error,
-        )
-
-    def _verify_spec_with_cache(
-        self,
-        spec: SpecRequirement,
-        spec_tests: dict[str, SpecTest],
-        test_results: dict[str, tuple[bool, Optional[str]]],
-        verbose: bool,
-    ) -> SpecResult:
-        """Verify a single specification using cached test results."""
-
-        # Handle SKIP verification type
-        if spec.verification_type == VerificationType.SKIP:
-            return SpecResult(
-                spec=spec,
-                status=SpecStatus.SKIPPED,
-                error_message="Skipped",
-            )
-
-        # Handle manual verification type
-        if spec.verification_type == VerificationType.MANUAL:
-            return SpecResult(
-                spec=spec,
-                status=SpecStatus.SKIPPED,
-                error_message="Manual verification required",
-            )
-
-        # Standard test verification
-        if spec.id not in spec_tests:
-            return SpecResult(
-                spec=spec,
-                status=SpecStatus.PENDING,
-                error_message=f"No test found for {spec.id}",
-            )
-
-        test = spec_tests[spec.id]
-
-        # Look up result from batch run
-        if test.test_path in test_results:
-            passed, error = test_results[test.test_path]
-        else:
-            # Fallback: test wasn't in batch (shouldn't happen)
-            passed, error = False, "Test not found in batch results"
-
-        return SpecResult(
-            spec=spec,
-            status=SpecStatus.PASSING if passed else SpecStatus.FAILING,
-            test=test,
-            error_message=error,
-        )
+            all_checks = by_id.get(spec.id, [])
+            required = [c for c in all_checks if c.kind == spec.verification_type.value]
+            test = next(iter(groups.get(spec.id, [])), None)
+            if spec.verification_type == VerificationType.SKIP:
+                status, reason = SpecStatus.SKIPPED, "Explicitly deferred"
+            elif spec.verification_type == VerificationType.MANUAL:
+                status, reason = SpecStatus.SKIPPED, "Human verification required"
+            elif any(c.status == "failed" for c in all_checks):
+                status, reason = SpecStatus.FAILING, "Linked verification failed"
+            elif not required:
+                status, reason = SpecStatus.PENDING, f"No {spec.verification_type.value} evidence"
+            elif any(c.status != "passed" for c in required):
+                status, reason = SpecStatus.UNKNOWN, "Required evidence was skipped or inconclusive"
+            else:
+                status, reason = SpecStatus.PASSING, None
+            results.append(SpecResult(spec, status, test, reason, all_checks))
+        return VerificationReport(results=results, evidence=checks)
 
     def verify_single(self, spec_id: str) -> Optional[SpecResult]:
-        """Verify a single spec by ID."""
-        specs = collect_specs(self.specs_dir)
-        spec = next((s for s in specs if s.id == spec_id), None)
-
-        if not spec:
-            return None
-
-        spec_tests = discover_spec_tests(self.tests_dir)
-        return self._verify_spec(spec, spec_tests, verbose=True)
+        specs = [s for s in collect_specs(self.specs_dir) if s.id == spec_id]
+        results = self._verify(specs, ()).results
+        return results[0] if results else None

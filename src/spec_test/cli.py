@@ -1,5 +1,6 @@
 """Command-line interface for spec-test."""
 
+import json
 import shutil
 import stat
 import subprocess
@@ -14,6 +15,7 @@ from rich.panel import Panel
 
 from . import __version__
 from .collector import collect_specs
+from .evidence import Evidence, load_evidence, write_evidence
 from .prover import (
     ProofResult,
     Z3_AVAILABLE,
@@ -21,6 +23,7 @@ from .prover import (
     verify_function,
 )
 from .reporter import Reporter
+from .types import SpecStatus, VerificationType
 from .verifier import SpecVerifier
 
 app = typer.Typer(
@@ -110,6 +113,15 @@ def verify(
     fail_on_unknown: bool = typer.Option(
         False, "--fail-on-unknown", help="Fail if any requested proof is unknown or skipped"
     ),
+    receipts: Optional[list[Path]] = typer.Option(
+        None, "--evidence", help="Load a trusted native runner receipt (repeatable)"
+    ),
+    evidence_output: Optional[Path] = typer.Option(
+        None, "--evidence-output", help="Write all observed checks as JSON"
+    ),
+    require_issues: bool = typer.Option(
+        False, "--require-issues", "--check-issues", help="Require valid local issue links"
+    ),
 ):
     """
     Verify all specifications have passing tests.
@@ -138,7 +150,30 @@ def verify(
         tests_dir=tests_dir,
     )
 
-    report = verifier.verify(verbose=verbose)
+    try:
+        external = [check for path in receipts or [] for check in load_evidence(path)]
+        proof_checks = _run_proofs(verbose) if proofs else []
+        report = verifier.verify(verbose=verbose, evidence=tuple(external + proof_checks))
+        known = {result.spec.id for result in report.results}
+        unknown_ids = sorted({check.spec_id for check in external} - known)
+        if unknown_ids:
+            raise ValueError(f"Evidence references undefined specifications: {', '.join(unknown_ids)}")
+        if evidence_output:
+            write_evidence(evidence_output, report.evidence)
+    except (OSError, ValueError) as exc:
+        console.print(str(exc), markup=False)
+        raise typer.Exit(code=5) from exc
+
+    bad_links = {}
+    for result in report.results:
+        spec = result.spec
+        if not spec.related_issues or any(not issue.exists for issue in spec.related_issues):
+            bad_links.setdefault(str(spec.source_file), []).append(spec.id)
+    for file, ids in sorted(bad_links.items()):
+        console.print(
+            f"Missing or broken Related Issue link in {file}: {', '.join(ids)}",
+            markup=False,
+        )
 
     reporter = Reporter()
     reporter.print_terminal(report)
@@ -156,69 +191,73 @@ def verify(
                 border_style="blue",
             ))
 
-    # Run formal proof verification if requested
-    proof_failures = 0
-    if proofs:
-        proof_results = _run_proofs(verbose)
-        proof_failures = proof_results["refuted"]
-        if fail_on_unknown:
-            proof_failures += proof_results["unknown"] + proof_results["skipped"]
+    proof_failures = any(
+        check.status == "failed"
+        or (fail_on_unknown and check.status in {"unknown", "skipped"})
+        for check in proof_checks
+    )
 
     if output:
         reporter.generate_markdown(report, output)
         console.print(f"\n[green]Report saved to {output}[/green]")
 
     # Exit codes
+    if require_issues and (bad_links or not report.results):
+        raise typer.Exit(code=5)
+    if proof_failures:
+        raise typer.Exit(code=4)
     if report.failing > 0:
         raise typer.Exit(code=1)
-    if fail_on_missing and report.missing > 0:
+    if fail_on_missing and (report.missing or report.unknown):
         raise typer.Exit(code=2)
-    if coverage and coverage_percent is not None and coverage_percent < coverage_threshold:
+    if coverage and (coverage_percent is None or coverage_percent < coverage_threshold):
         raise typer.Exit(code=3)
-    if proofs and proof_failures > 0:
-        raise typer.Exit(code=4)
 
 
-def _run_proofs(verbose: bool) -> dict[str, int]:
+def _run_proofs(verbose: bool) -> list[Evidence]:
     """Run Z3 formal proof verification on @provable functions.
 
-    Returns dict with counts: proven, refuted, unknown, skipped
+    Returns typed receipts for the combined report.
     """
     registry = get_provable_registry()
 
     if not registry:
         if verbose:
             console.print("[dim]No @provable functions registered[/dim]")
-        return {"proven": 0, "refuted": 0, "unknown": 0, "skipped": 0}
+        return []
 
     results = {"proven": 0, "refuted": 0, "unknown": 0, "skipped": 0}
     outcomes = []
+    checks = []
 
     console.print(f"\n[bold]Running Z3 Proof Verification[/bold] ({len(registry)} functions)")
     console.print()
 
+    result_status = {
+        ProofResult.PROVEN: "passed",
+        ProofResult.REFUTED: "failed",
+        ProofResult.UNKNOWN: "unknown",
+        ProofResult.SKIPPED: "skipped",
+    }
     for spec_id, info in registry.items():
+        witness = None
         try:
-            func = info.function
-
-            if func is None:
-                outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, "Function not found"))
-                results["skipped"] += 1
-                continue
-
-            outcome = verify_function(func)
-            outcomes.append((spec_id, info.func_name, outcome.result, outcome.message))
-
-            key = outcome.result.value
-            results[key] = results.get(key, 0) + 1
-
-            # Show counter-example if refuted
-            if outcome.result == ProofResult.REFUTED and outcome.counter_example is not None:
-                console.print(f"  Counter-example: {outcome.counter_example}", markup=False)
-
-        except Exception as e:
-            outcomes.append((spec_id, info.func_name, ProofResult.SKIPPED, str(e)))
-            results["skipped"] += 1
+            if info.function is None:
+                result, message = ProofResult.SKIPPED, "Function not found"
+            else:
+                outcome = verify_function(info.function)
+                result, message = outcome.result, outcome.message
+                witness = outcome.counter_example
+        except Exception as exc:
+            result, message = ProofResult.SKIPPED, str(exc)
+        outcomes.append((spec_id, info.func_name, result, message))
+        results[result.value] += 1
+        checks.append(Evidence(
+            spec_id, "implementation-proof", "z3-python", info.full_name,
+            result_status[result], {"message": message, "counterexample": witness},
+        ))
+        if result == ProofResult.REFUTED and witness is not None:
+            console.print(f"  Counter-example: {witness}", markup=False)
 
     # Display results
     for spec_id, func_name, result, message in outcomes:
@@ -240,7 +279,7 @@ def _run_proofs(verbose: bool) -> dict[str, int]:
 
     if results["refuted"] > 0:
         border_style = "red"
-    elif results["proven"] > 0 and results["unknown"] == 0:
+    elif results["proven"] > 0 and results["unknown"] == 0 and results["skipped"] == 0:
         border_style = "green"
     else:
         border_style = "yellow"
@@ -251,7 +290,7 @@ def _run_proofs(verbose: bool) -> dict[str, int]:
         border_style=border_style,
     ))
 
-    return results
+    return checks
 
 
 def _run_coverage(tests_dir: Path, source_dir: Optional[Path], verbose: bool) -> Optional[float]:
@@ -315,7 +354,9 @@ def list_specs(
         raise typer.Exit(code=0)
 
     # Count specs with/without issues
-    with_issues = sum(1 for s in specs if s.has_issue)
+    with_issues = sum(
+        1 for s in specs if s.has_issue and all(issue.exists for issue in s.related_issues)
+    )
     without_issues = len(specs) - with_issues
 
     console.print(f"\n[bold]Found {len(specs)} specifications:[/bold]")
@@ -334,7 +375,7 @@ def list_specs(
         if show_issues:
             if spec.has_issue:
                 for issue in spec.related_issues:
-                    exists = Path(issue.path).exists()
+                    exists = issue.exists
                     status = "[green]✓[/green]" if exists else "[red]✗ not found[/red]"
                     console.print(f"    Issue: {status} {issue.title}")
             else:
@@ -366,6 +407,34 @@ def check(
         console.print(f"  Test: [dim]{result.test.test_path}[/dim]")
     if result.error_message:
         console.print(f"  [red]{result.error_message}[/red]")
+    if result.status in {SpecStatus.FAILING, SpecStatus.PENDING, SpecStatus.UNKNOWN}:
+        raise typer.Exit(code=1)
+
+
+@app.command("review-packet")
+def review_packet(
+    specs_dir: Path = typer.Option(Path("design/specs"), "--specs", "-s"),
+    output: Path = typer.Option(..., "--output", "-o"),
+):
+    """Export manual/AI-assisted review inputs without calling an external service."""
+    packet = []
+    for requirement in collect_specs(specs_dir):
+        if requirement.verification_type is not VerificationType.MANUAL:
+            continue
+        packet.append({
+            "spec_id": requirement.id,
+            "requirement": requirement.description,
+            "source": str(requirement.source_file),
+            "line": requirement.source_line,
+            "issue_titles": [issue.title for issue in requirement.related_issues],
+            "review_hint": requirement.review_notes,
+            "status": "needs-human-review",
+        })
+    output.write_text(
+        json.dumps({"schema_version": 1, "items": packet}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    console.print(f"Prepared {len(packet)} unverified review items.")
 
 
 @app.command()

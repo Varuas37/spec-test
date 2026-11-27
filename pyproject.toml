@@ -23,8 +23,12 @@ dev = [
 z3 = [
     "z3-solver>=4.12.0",
 ]
+hypothesis = [
+    "hypothesis>=6.100,<7",
+]
 all = [
     "z3-solver>=4.12.0",
+    "hypothesis>=6.100,<7",
 ]
 
 [project.scripts]

@@ -66,11 +66,16 @@ class Reporter:
             SpecStatus.PASSING: "[green]PASS[/green]",
             SpecStatus.FAILING: "[red]FAIL[/red]",
             SpecStatus.PENDING: "[yellow]NO TEST[/yellow]",
+            SpecStatus.UNKNOWN: "[yellow]UNKNOWN[/yellow]",
             SpecStatus.SKIPPED: "[dim]SKIP[/dim]",
         }.get(status, "?")
 
     def _get_test_info(self, result: SpecResult) -> str:
         """Get test path or status notes."""
+        if result.evidence:
+            return ", ".join(
+                f"{check.kind} ({check.runner}): {check.status}" for check in result.evidence
+            )
         if result.test:
             return f"[dim]{result.test.test_path}[/dim]"
         if result.error_message:
@@ -87,6 +92,7 @@ class Reporter:
   [green]Passing:[/green]        {report.passing}
   [red]Failing:[/red]        {report.failing}
   [yellow]Missing Tests:[/yellow] {report.missing}
+  [yellow]Unknown:[/yellow]        {report.unknown}
   [dim]Skipped:[/dim]        {report.skipped}
 
   [bold]Coverage:[/bold]       {report.coverage_percent:.1f}%
@@ -131,10 +137,13 @@ class Reporter:
                 SpecStatus.PASSING: "PASS",
                 SpecStatus.FAILING: "FAIL",
                 SpecStatus.PENDING: "NO TEST",
+                SpecStatus.UNKNOWN: "UNKNOWN",
                 SpecStatus.SKIPPED: "SKIP",
             }.get(result.status, "?")
 
-            test_path = result.test.test_path if result.test else "-"
+            test_path = self._get_test_info(result) if result.evidence else (
+                result.test.test_path if result.test else "-"
+            )
             desc = result.spec.description.replace("|", "\\|")
 
             lines.append(f"| {result.spec.id} | {desc} | {status} | `{test_path}` |")
