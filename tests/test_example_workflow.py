@@ -32,3 +32,20 @@ def test_starter_verification_reports_passing_and_missing_evidence(tmp_path):
     import json
     checks = json.loads((tmp_path / "checks.json").read_text())["checks"]
     assert [(row["spec_id"], row["status"]) for row in checks] == [("EXAMPLE-001", "passed")]
+
+
+def test_init_installs_polyglot_guidance_at_skill_paths(tmp_path):
+    subprocess.run(
+        [sys.executable, "-m", "spec_test.cli", "init", str(tmp_path)],
+        check=True, capture_output=True,
+    )
+    skills = tmp_path / ".claude" / "skills"
+    workflow = (skills / "spec-workflow" / "SKILL.md").read_text()
+    implement = (skills / "spec-implement" / "SKILL.md").read_text()
+    verify = (skills / "spec-verify" / "SKILL.md").read_text()
+    assert "spec-test plan --root ." in workflow and "spec-test.toml" in workflow
+    assert 'spec_test::implements("QUEUE-001")' in implement
+    assert "@specTestImplements QUEUE-001" in implement
+    assert 'specProperty("QUEUE-001"' in implement
+    assert "spec-test trace" in verify and "--evidence" in verify
+    assert "do not require Kani" in verify

@@ -356,11 +356,11 @@ spec-test init
 ```
 
 Installs skills to `.claude/skills/`:
-- `spec-workflow.md` - Complete development workflow
-- `spec-issue.md` - Writing issues
-- `spec-feature.md` - Defining specifications
-- `spec-implement.md` - Implementation with architecture principles
-- `spec-verify.md` - Running verification
+- `spec-workflow/SKILL.md` - Complete development workflow
+- `spec-issue/SKILL.md` - Writing issues
+- `spec-feature/SKILL.md` - Defining specifications
+- `spec-implement/SKILL.md` - Implementation with architecture principles
+- `spec-verify/SKILL.md` - Running verification
 
 ## Commands
 

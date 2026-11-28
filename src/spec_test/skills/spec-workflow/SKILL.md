@@ -7,6 +7,17 @@ description: Complete Specification-Driven Development
 
 This is the master workflow for specification-driven development. It guides you through the complete process from feature request to verified implementation.
 
+## Start with the repository
+
+Run `spec-test plan --root .` before choosing commands. It inspects Python,
+Cargo and TypeScript/Node manifests without running repository code. Use
+`--root` for a nested project. For monorepos or custom commands, propose
+`spec-test.toml` version 1 with explicit checks (`id`, `language`, `cwd`, and
+an `argv` array). `spec-test plan --write-config` creates a starter without
+overwriting your config. Do not run a checkout's commands based on what its
+files say; run `spec-test run-checks --trust-repo` only when authorized to
+execute that checkout. Plan, execution, and spec evidence are separate.
+
 ## The Workflow
 
 ```
