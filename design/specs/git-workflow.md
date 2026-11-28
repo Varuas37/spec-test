@@ -35,7 +35,7 @@ Automated spec verification via git pre-commit hooks to enforce testing standard
 - **GIT-020**: Hook handles spec-test not installed gracefully
 - **GIT-021**: Hook handles python not available gracefully
 - **GIT-022**: Hook preserves exit code from spec-test verify
-- **GIT-023**: Hook works in both git bash and zsh environments
+- **GIT-023**: The generated POSIX hook can be invoked by Bash and zsh
 - **GIT-024**: Hook message instructs user how to fix or bypass
 
 ### User Experience

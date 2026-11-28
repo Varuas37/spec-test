@@ -13,7 +13,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from . import __version__
+from . import __version__, repo_plan
 from .collector import collect_specs
 from .evidence import Evidence, load_evidence, write_evidence
 from .prover import (
@@ -623,27 +623,35 @@ def _setup_git_hooks(path: Path) -> bool:
 
 echo "Running spec-test verification..."
 
-# Try to find spec-test in common locations
+# Use the installed CLI, or a Python interpreter that can import it.
 if command -v spec-test >/dev/null 2>&1; then
-    SPEC_TEST_CMD="spec-test"
-elif command -v python3 >/dev/null 2>&1; then
-    SPEC_TEST_CMD="python3 -m spec_test.cli"
-elif command -v python >/dev/null 2>&1; then
-    SPEC_TEST_CMD="python -m spec_test.cli"
+    set -- spec-test
 else
-    echo "❌ Cannot find spec-test or python. Install spec-test first."
-    exit 1
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON=python3
+    elif command -v python >/dev/null 2>&1; then
+        PYTHON=python
+    else
+        echo "❌ Cannot find spec-test or python. Install spec-test first."
+        exit 1
+    fi
+    if ! "$PYTHON" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("spec_test") is None)'; then
+        echo "❌ spec-test is not installed for $PYTHON. Install with: $PYTHON -m pip install spec-test"
+        exit 1
+    fi
+    set -- "$PYTHON" -m spec_test.cli
 fi
 
-$SPEC_TEST_CMD verify
+"$@" verify
+verification_status=$?
 
-if [ $? -ne 0 ]; then
+if [ "$verification_status" -ne 0 ]; then
     echo ""
     echo "❌ Commit blocked: spec-test verification failed"
     echo "   - Fix failing tests"
     echo "   - Add missing tests"
     echo "   - Or skip with: git commit --no-verify"
-    exit 1
+    exit "$verification_status"
 fi
 
 echo "✅ All specs verified"
@@ -695,8 +703,8 @@ This is an example specification file. Replace with your actual specs.
 ## Requirements
 
 ### Core Features
-- **EXAMPLE-001**: The system should do something useful
-- **EXAMPLE-002**: The system should handle errors gracefully
+- **EXAMPLE-001**: A starter requirement with passing evidence is reported as passing.
+- **EXAMPLE-002**: A starter requirement without evidence is reported as missing and verification exits nonzero.
 - **EXAMPLE-003** [manual]: Code follows project naming conventions
 """)
 
@@ -812,6 +820,46 @@ spec-test check PREFIX-001  # Check single spec
             console.print("[yellow]Git workflow setup skipped[/yellow]")
 
     console.print("\n[green]Ready! Run 'spec-test verify' to check your specs.[/green]")
+
+
+@app.command()
+def plan(
+    root: Path = typer.Option(Path("."), "--root", help="Repository or project directory"),
+    write_config: bool = typer.Option(False, "--write-config", help="Save detected checks without overwriting"),
+) -> None:
+    """Detect native checks or read spec-test.toml, without running commands."""
+    try:
+        result = repo_plan.discover(root)
+        if write_config:
+            repo_plan.write_config(root, result)
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(json.dumps(result.as_dict(), indent=2))
+
+
+@app.command("run-checks")
+def run_checks(
+    root: Path = typer.Option(Path("."), "--root", help="Repository or project directory"),
+    trust_repo: bool = typer.Option(False, "--trust-repo", help="Authorize execution of repository code"),
+) -> None:
+    """Run planned native checks in a trusted checkout; does not satisfy spec IDs by itself."""
+    if not trust_repo:
+        typer.echo("Review spec-test plan, then use --trust-repo to run repository code.", err=True)
+        raise typer.Exit(2)
+    try:
+        root = root.resolve(strict=True)
+        result = repo_plan.discover(root)
+        for note in result.notes:
+            typer.echo(note, err=True)
+        if not result.checks:
+            raise ValueError("No runnable checks in this project")
+        status = repo_plan.run_checks(root, result)
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    if status:
+        raise typer.Exit(status)
 
 
 if __name__ == "__main__":

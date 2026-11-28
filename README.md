@@ -306,9 +306,10 @@ $ spec-test verify --proofs --proof-module my_package.proofs --fail-on-unknown
 Proven: 1 | Refuted: 0 | Unknown: 0 | Skipped: 0
 ```
 
-The initial proof subset is a single return expression over explicit Python
-`int` and `bool` values, including arithmetic (`+`, `-`, `*`), comparisons,
-Boolean logic, and ternaries. Z3 checks the actual modeled return against every
+The proof subset uses explicit Python `int` and `bool` values, including
+arithmetic (`+`, `-`, `*`), comparisons, Boolean logic, and ternaries. Pure
+`if`/`elif`/`else` statements and early returns are supported when every
+structural path returns the declared type. Z3 checks the actual modeled return against every
 postcondition, under every precondition. Unsupported code or predicates and
 contradictory preconditions never count as proved. A refutation prints the input
 values. Runtime checks remain on. Use `--fail-on-unknown` in CI to reject skipped
@@ -451,3 +452,38 @@ They produce the same receipt format without using the same test runner. Rust
 also supplies a separately runnable Kani harness; the ordinary Rust receipt
 marks it skipped. TypeScript checks the real implementation without claiming
 a TypeScript solver proof.
+
+## Plan and run repository checks
+
+From a Python, Rust or TypeScript project root:
+
+```sh
+spec-test plan
+spec-test run-checks --trust-repo
+```
+
+`plan` only inspects manifests and prints the chosen commands as JSON. It
+recognizes pytest, Cargo packages/workspaces, and Node packages with a test
+script (using the declared package manager or an unambiguous lockfile).
+Use `--root path` to inspect a subproject. Inspect the plan before running.
+`run-checks` executes repository code, is not a sandbox, and does not install
+dependencies. Only pass `--trust-repo` on a checkout you intend to execute.
+
+For a monorepo, an unusual test setup, or a custom command, save a starter
+with `spec-test plan --write-config` (never overwrites), or commit a
+`spec-test.toml` with version 1 and one record per check:
+
+```toml
+schema_version = 1
+
+[[checks]]
+id = "web"
+language = "typescript"
+cwd = "packages/web"
+argv = ["pnpm", "test"]
+```
+
+Use repository-relative working directories and argument arrays. An agent can
+inspect or propose this config without executing anything. A native command
+passing is not a spec-level receipt; use `spec-test verify --evidence …` for
+requirement outcomes and optional prover receipts.

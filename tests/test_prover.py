@@ -372,3 +372,90 @@ def test_cli_runs_proof_in_fresh_process(tmp_path, mode):
     assert (run.returncode, marker in run.stdout) == (code, True), run.stdout + run.stderr
     if mode == "refute":
         assert "Counter-example: {'x': 0}" in run.stdout
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-052", "Every supported control path returns its declared non-optional type")
+def test_nested_conditional_returns_and_trailing_continuation():
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def magnitude(x: int, reflect: bool) -> int:
+        if x < 0:
+            if reflect:
+                return -x
+        elif x > 0:
+            return x
+        return 0
+
+    assert verify_function(magnitude).result is ProofResult.PROVEN
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+def test_early_return_takes_priority_and_mutation_replays():
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def broken(x: int) -> int:
+        if x < 0:
+            return x
+        if x < 1:
+            return 0
+        return x + 1
+
+    outcome = verify_function(broken)
+    assert outcome.result is ProofResult.REFUTED
+    witness = outcome.counter_example
+    assert witness is not None and witness["x"] < 0
+    assert broken.__wrapped__.__wrapped__(**witness) < 0
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+def test_total_boolean_branches_work_without_a_trailing_return():
+    @provable()
+    @contract(ensures=[lambda result: result])
+    def valid(flag: bool) -> bool:
+        if flag:
+            return flag
+        else:
+            return not flag
+
+    assert verify_function(valid).result is ProofResult.PROVEN
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+def test_fallthrough_and_partial_translation_never_pass():
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def missing(x: int) -> int:
+        if x < 0:
+            return -x
+
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def unsupported(x: int) -> int:
+        if x < 0:
+            return abs(x)
+        return x
+
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def mixed(x: int) -> int:
+        if x < 0:
+            return True
+        return x
+
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def truthy(x: int) -> int:
+        if x:
+            return 1
+        return 0
+
+    for fn, reason in (
+        (missing, "falls through"),
+        (unsupported, "return expression"),
+        (mixed, "declared type"),
+        (truthy, "boolean branch"),
+    ):
+        outcome = verify_function(fn)
+        assert outcome.result is ProofResult.SKIPPED
+        assert reason in outcome.message
