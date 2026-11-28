@@ -5,6 +5,12 @@ Property-based testing using Hypothesis to automatically generate test cases and
 ## Related Issue
 - [ISSUE-003: Hypothesis Property Testing Integration](../issues/003-hypothesis-integration.md)
 
+The [issue's scope decision](../issues/003-hypothesis-integration.md) separates
+the supported adapter from the retained roadmap below. Native Hypothesis
+settings and profiles are the configuration channel for supported settings;
+HYP-040 describes a separate, deferred TOML feature. Native pytest diagnostic
+output is distinct from the spec-test status and evidence report.
+
 ---
 
 ## Property Test Decorator
@@ -145,7 +151,7 @@ Property-based testing using Hypothesis to automatically generate test cases and
 
   **Contracts:**
   - Requires: property test completes (pass or fail)
-  - Ensures: output shows how many examples were tested
+  - Ensures: native pytest with `--hypothesis-show-statistics` shows example counts
 
 ---
 
@@ -160,44 +166,44 @@ Property-based testing using Hypothesis to automatically generate test cases and
 - **HYP-041**: Support max_examples setting
 
   **Contracts:**
-  - Requires: max_examples specified in config
-  - Ensures: property tests run at most max_examples times
+  - Requires: max_examples specified in native settings or a native profile
+  - Ensures: Hypothesis receives the generation budget; shrinking and replay may run extra calls
 
 - **HYP-042**: Support deadline setting
 
   **Contracts:**
-  - Requires: deadline specified in config (ms or None)
-  - Ensures: individual examples timeout after deadline
+  - Requires: deadline specified in native settings (e.g., milliseconds or None)
+  - Ensures: Hypothesis reports an example exceeding the deadline; the deadline does not interrupt it
 
 - **HYP-043**: Support suppress_health_check setting
 
   **Contracts:**
-  - Requires: suppress_health_check specified in config
+  - Requires: suppress_health_check specified in native settings or a native profile
   - Ensures: specified health checks suppressed
 
 - **HYP-044**: Support database path setting
 
   **Contracts:**
-  - Requires: database_path specified in config
-  - Ensures: hypothesis database stored at specified path
+  - Requires: native settings receive a DirectoryBasedExampleDatabase at the chosen path
+  - Ensures: Hypothesis stores and reuses failures at that path across processes
 
-- **HYP-045**: Per-test settings override global config
+- **HYP-045**: Per-test settings override the active native profile
 
   **Contracts:**
-  - Requires: @property_test has settings parameter
-  - Ensures: test-level settings take precedence over global config
+  - Requires: @property_test supplies settings and a native profile is active
+  - Ensures: specified values take precedence; unspecified values inherit the profile
 
 - **HYP-046**: Support verbosity setting
 
   **Contracts:**
-  - Requires: verbosity specified in config
-  - Ensures: hypothesis output verbosity matches setting
+  - Requires: verbosity specified in native settings or a native profile
+  - Ensures: Hypothesis uses the configured verbosity
 
 - **HYP-047**: Support derandomize setting for CI
 
   **Contracts:**
-  - Requires: derandomize=true in config
-  - Ensures: tests run deterministically with fixed seed
+  - Requires: derandomize=True in native settings for unchanged test and Hypothesis version
+  - Ensures: independent test runs generate the same examples without a persistent database
 
 ---
 

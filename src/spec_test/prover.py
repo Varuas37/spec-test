@@ -3,10 +3,10 @@
 import ast
 import functools
 import inspect
-import textwrap
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from types import CodeType
 from typing import Any, Callable, Optional, TypeVar
 
 # Try to import z3, provide helpful error if not installed
@@ -72,7 +72,8 @@ def provable(
     Decorator to mark a function for Z3 formal verification.
 
     Place this outside @contract. Z3 checks postconditions on the return
-    expression for the supported int/bool subset and declared preconditions.
+    expression for the supported int/bool subset and declared preconditions. The proof
+    also checks that no reachable arithmetic expression divides by zero.
 
     Args:
         spec: Optional spec ID to link this proof to
@@ -199,77 +200,91 @@ def verify_function(func: Callable) -> ProofOutcome:
         if not contract_info.ensures:
             raise ValueError("No postconditions to prove")
         postconditions = [
-            _translate_predicate(cond, {"result": result})
+            _translate_predicate(cond, {"result": result.value})
             for cond in contract_info.ensures
         ]
     except (TypeError, ValueError, OSError, SyntaxError, RecursionError, z3.Z3Exception) as exc:
         return skipped(f"Unsupported proof: {exc}")
 
-    # Create Z3 solver
+    # Preconditions run in order: a false condition rejects the call, while
+    # an undefined condition is a runtime error even if a later one is false.
+    reachable = z3.BoolVal(True)
+    failures = []
+    for index, condition in enumerate(preconditions, 1):
+        failures.append((
+            f"Precondition {index} can divide by zero",
+            z3.And(reachable, z3.Not(condition.defined)),
+        ))
+        reachable = z3.And(reachable, condition.defined, condition.value)
+    domain = reachable
+
+    failures.append((
+        "Function body can divide by zero",
+        z3.And(reachable, z3.Not(result.defined)),
+    ))
+    reachable = z3.And(reachable, result.defined)
+    for index, condition in enumerate(postconditions, 1):
+        failures.extend((
+            (f"Postcondition {index} can divide by zero",
+             z3.And(reachable, z3.Not(condition.defined))),
+            (f"Postcondition {index} fails",
+             z3.And(reachable, condition.defined, z3.Not(condition.value))),
+        ))
+        reachable = z3.And(reachable, condition.defined, condition.value)
+
     solver = z3.Solver()
-    solver.set("timeout", provable_info.timeout * 1000)  # ms
-
-    solver.add(*preconditions)
     start = time.monotonic()
-    domain = solver.check()
-    if domain == z3.unsat:
-        return skipped("Preconditions are unsatisfiable; no valid inputs")
-    if domain == z3.sat:
-        # The solver timeout is shared between the two checks.
+    unknown_reason = ""
+
+    def check(goal: Any) -> Any:
+        nonlocal unknown_reason
         remaining = provable_info.timeout * 1000 - (time.monotonic() - start) * 1000
-        if remaining >= 1:
-            solver.set("timeout", int(remaining))
-            solver.add(z3.Not(z3.And(*postconditions)))
-            check_result = solver.check()
-        else:
-            check_result = z3.unknown
-    else:
-        check_result = z3.unknown
-    elapsed_ms = (time.monotonic() - start) * 1000
+        if remaining < 1:
+            unknown_reason = "shared proof timeout expired"
+            return z3.unknown
+        solver.set("timeout", int(remaining))
+        checked = solver.check(goal)
+        if checked == z3.unknown:
+            unknown_reason = solver.reason_unknown()
+        return checked
 
-    if check_result == z3.unsat:
-        # NOT(postcondition) is unsatisfiable - proof succeeded!
-        outcome = ProofOutcome(
-            result=ProofResult.PROVEN,
+    def outcome(
+        status: ProofResult, message: str, witness: Optional[dict[str, Any]] = None
+    ) -> ProofOutcome:
+        result = ProofOutcome(
+            result=status,
             function_name=provable_info.func_name,
             spec_id=provable_info.spec_id,
-            message="Postconditions proven to hold for all valid inputs",
-            proof_time_ms=elapsed_ms,
+            message=message,
+            counter_example=witness,
+            proof_time_ms=(time.monotonic() - start) * 1000,
         )
-        provable_info.proof_outcome = outcome
-        return outcome
+        provable_info.proof_outcome = result
+        return result
 
-    elif check_result == z3.sat:
-        # Found a counter-example where postcondition fails
+    failure_check = check(z3.Or(*(reason for _, reason in failures)))
+    if failure_check == z3.sat:
         model = solver.model()
-        counter_example = {}
-        for name, var in z3_vars.items():
-            counter_example[name] = _z3_value_to_python(
-                model.evaluate(var, model_completion=True)
-            )
+        witness = {
+            name: _z3_value_to_python(model.evaluate(var, model_completion=True))
+            for name, var in z3_vars.items()
+        }
+        for message, reason in failures:
+            if z3.is_true(model.evaluate(reason, model_completion=True)):
+                return outcome(ProofResult.REFUTED, message, witness)
+        return outcome(ProofResult.UNKNOWN, "Could not classify the solver counterexample")
 
-        outcome = ProofOutcome(
-            result=ProofResult.REFUTED,
-            function_name=provable_info.func_name,
-            spec_id=provable_info.spec_id,
-            message="Found counter-example where postcondition fails",
-            counter_example=counter_example,
-            proof_time_ms=elapsed_ms,
-        )
-        provable_info.proof_outcome = outcome
-        return outcome
+    if failure_check == z3.unsat:
+        domain_check = check(domain)
+        if domain_check == z3.sat:
+            return outcome(ProofResult.PROVEN, "Postconditions proven to hold for all valid inputs")
+        if domain_check == z3.unsat:
+            return outcome(ProofResult.SKIPPED, "Preconditions are unsatisfiable; no valid inputs")
 
-    else:
-        # Unknown (timeout or too complex)
-        outcome = ProofOutcome(
-            result=ProofResult.UNKNOWN,
-            function_name=provable_info.func_name,
-            spec_id=provable_info.spec_id,
-            message="Z3 could not determine - try increasing timeout or simplifying constraints",
-            proof_time_ms=elapsed_ms,
-        )
-        provable_info.proof_outcome = outcome
-        return outcome
+    return outcome(
+        ProofResult.UNKNOWN,
+        f"Z3 could not determine: {unknown_reason or 'solver returned unknown'}",
+    )
 
 
 def _create_z3_variable(name: str, python_type: Any) -> Any:
@@ -302,13 +317,80 @@ def _proof_body(func: Callable) -> Callable:
     return original
 
 
-def _translate_return(func: Callable, variables: dict[str, Any], expected_sort: Any) -> Any:
+@dataclass(frozen=True)
+class _Expression:
+    """A symbolic value paired with the condition under which Python computes it."""
+
+    value: Any
+    defined: Any
+
+
+def _strict(value: Any, *args: _Expression) -> _Expression:
+    return _Expression(value, z3.And(*(arg.defined for arg in args)) if args else z3.BoolVal(True))
+
+
+def _conditional(test: _Expression, yes: _Expression, no: _Expression) -> _Expression:
+    return _Expression(
+        z3.If(test.value, yes.value, no.value),
+        z3.And(test.defined, z3.If(test.value, yes.defined, no.defined)),
+    )
+
+
+def _same_loaded_code(candidate: CodeType, loaded: CodeType) -> bool:
+    # Names, argument binding and typed constants matter even when the raw
+    # instruction bytes are equal (e.g. return 1 versus return True).
+    fields = (
+        "co_code", "co_names", "co_varnames", "co_argcount", "co_posonlyargcount",
+        "co_kwonlyargcount", "co_flags", "co_freevars", "co_cellvars", "co_exceptiontable",
+    )
+    return (
+        all(getattr(candidate, field) == getattr(loaded, field) for field in fields)
+        and len(candidate.co_consts) == len(loaded.co_consts)
+        and all(
+            type(a) is type(b) and a == b
+            for a, b in zip(candidate.co_consts, loaded.co_consts)
+        )
+    )
+
+
+def _loaded_ast(func: Callable) -> ast.Module:
+    """Parse source only if it still describes the live function or lambda."""
+    source, _ = inspect.findsource(func)
+    loaded = func.__code__
+    tree = ast.parse("".join(source), filename=loaded.co_filename)
+    compiled = compile(tree, loaded.co_filename, "exec", dont_inherit=True)
+    todo = [compiled]
+    matches = 0
+    while todo:
+        code = todo.pop()
+        if (
+            code.co_qualname == loaded.co_qualname
+            and code.co_firstlineno == loaded.co_firstlineno
+            and tuple(code.co_positions()) == tuple(loaded.co_positions())
+            and _same_loaded_code(code, loaded)
+        ):
+            matches += 1
+        todo.extend(c for c in code.co_consts if isinstance(c, CodeType))
+    if matches != 1:
+        raise ValueError("Inspected source does not uniquely match the loaded Python code")
+    return tree
+
+
+def _translate_return(
+    func: Callable, variables: dict[str, Any], expected_sort: Any
+) -> _Expression:
     if func.__code__.co_freevars:
         raise ValueError("Closures are not supported")
-    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
-    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
-        raise ValueError("Expected a top-level function in the inspected source")
-    body = tree.body[0].body[:]
+    tree = _loaded_ast(func)
+    functions = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == func.__name__
+        and min([node.lineno, *(d.lineno for d in node.decorator_list)])
+        == func.__code__.co_firstlineno
+    ]
+    if len(functions) != 1:
+        raise ValueError("Cannot identify the exact implementation definition")
+    body = functions[0].body[:]
     if (
         body and isinstance(body[0], ast.Expr)
         and isinstance(body[0].value, ast.Constant)
@@ -325,8 +407,8 @@ def _translate_block(
     body: list[ast.stmt],
     variables: dict[str, Any],
     expected_sort: Any,
-    continuation: Any,
-) -> Any:
+    continuation: Optional[_Expression],
+) -> Optional[_Expression]:
     """Fold a pure block over what runs if it does not return itself."""
     result = continuation
     for statement in reversed(body):
@@ -334,17 +416,17 @@ def _translate_block(
             result = _ast_to_z3(statement.value, variables)
             if result is None:
                 raise ValueError("Cannot model the return expression")
-            if not result.sort().eq(expected_sort):
+            if not result.value.sort().eq(expected_sort):
                 raise ValueError("Return expression does not match declared type")
         elif isinstance(statement, ast.If):
             test = _ast_to_z3(statement.test, variables)
-            if not z3.is_bool(test):
+            if test is None or not z3.is_bool(test.value):
                 raise ValueError("Only supported boolean branch conditions can be modeled")
             yes = _translate_block(statement.body, variables, expected_sort, result)
             no = _translate_block(statement.orelse, variables, expected_sort, result)
             if yes is None or no is None:
                 raise ValueError("A control path falls through without a return")
-            result = z3.If(test, yes, no)
+            result = _conditional(test, yes, no)
         else:
             raise ValueError(f"Cannot model statement: {type(statement).__name__}")
     return result
@@ -352,7 +434,7 @@ def _translate_block(
 
 def _translate_predicate(
     func: Callable, variables: dict[str, Any], *, match_names: bool = False
-) -> Any:
+) -> _Expression:
     if not inspect.isfunction(func) or func.__name__ != "<lambda>" or func.__code__.co_freevars:
         raise ValueError("Expected a lambda without captured values")
     params = list(inspect.signature(func).parameters.values())
@@ -365,8 +447,7 @@ def _translate_predicate(
 
     # Full module source handles multiple lambdas on one line and multiline
     # predicates. Match the actual code-object span, never the first lambda.
-    source, _ = inspect.findsource(func)
-    tree = ast.parse("".join(source))
+    tree = _loaded_ast(func)
     spans = set(func.__code__.co_positions())
     matches = [
         node for node in ast.walk(tree)
@@ -378,115 +459,119 @@ def _translate_predicate(
         raise ValueError("Cannot identify the exact predicate lambda")
     mapping = {p.name: value for p, value in zip(params, variables.values())}
     predicate = _ast_to_z3(matches[0].body, mapping)
-    if not z3.is_bool(predicate):
+    if predicate is None or not z3.is_bool(predicate.value):
         raise ValueError("Predicate must be a supported Boolean expression")
     return predicate
 
 
-def _ast_to_z3(node: ast.AST, var_mapping: dict[str, Any]) -> Optional[Any]:
-    """Convert Python AST to Z3 expression."""
-    if not Z3_AVAILABLE:
-        return None
-
+def _ast_to_z3(node: ast.AST, variables: dict[str, Any]) -> Optional[_Expression]:
+    """Translate the pure subset without assuming Z3's total arithmetic is Python's."""
     if isinstance(node, ast.Compare):
-        # Handle comparisons: x > 0, x == y, etc.
-        left = _ast_to_z3(node.left, var_mapping)
-        if left is None:
+        current = _ast_to_z3(node.left, variables)
+        if current is None:
             return None
 
-        results = []
-        current = left
+        value = z3.BoolVal(True)
+        defined = current.defined
         for op, comparator in zip(node.ops, node.comparators):
-            right = _ast_to_z3(comparator, var_mapping)
-            if right is None or not current.sort().eq(right.sort()):
+            next_operand = _ast_to_z3(comparator, variables)
+            if next_operand is None or not current.value.sort().eq(next_operand.value.sort()):
                 return None
-            if not isinstance(op, (ast.Eq, ast.NotEq)) and not z3.is_int(current):
+            left, right = current.value, next_operand.value
+            if not isinstance(op, (ast.Eq, ast.NotEq)) and not z3.is_int(left):
                 return None
 
             if isinstance(op, ast.Gt):
-                results.append(current > right)
+                compared = left > right
             elif isinstance(op, ast.GtE):
-                results.append(current >= right)
+                compared = left >= right
             elif isinstance(op, ast.Lt):
-                results.append(current < right)
+                compared = left < right
             elif isinstance(op, ast.LtE):
-                results.append(current <= right)
+                compared = left <= right
             elif isinstance(op, ast.Eq):
-                results.append(current == right)
+                compared = left == right
             elif isinstance(op, ast.NotEq):
-                results.append(current != right)
+                compared = left != right
             else:
                 return None
 
-            current = right
+            # In a chain the next operand is evaluated only if earlier comparisons held.
+            defined = z3.And(defined, z3.Implies(value, next_operand.defined))
+            value = z3.And(value, compared)
+            current = next_operand
+        return _Expression(value, defined)
 
-        return z3.And(*results) if len(results) > 1 else results[0]
-
-    elif isinstance(node, ast.BinOp):
-        # Handle binary operations: +, -, *, /, etc.
-        left = _ast_to_z3(node.left, var_mapping)
-        right = _ast_to_z3(node.right, var_mapping)
-        if not z3.is_int(left) or not z3.is_int(right):
+    if isinstance(node, ast.BinOp):
+        lhs = _ast_to_z3(node.left, variables)
+        rhs = _ast_to_z3(node.right, variables)
+        if lhs is None or rhs is None or not z3.is_int(lhs.value) or not z3.is_int(rhs.value):
             return None
-
+        left, right = lhs.value, rhs.value
         if isinstance(node.op, ast.Add):
-            return left + right
-        elif isinstance(node.op, ast.Sub):
-            return left - right
-        elif isinstance(node.op, ast.Mult):
-            return left * right
-        else:
-            return None
+            return _strict(left + right, lhs, rhs)
+        if isinstance(node.op, ast.Sub):
+            return _strict(left - right, lhs, rhs)
+        if isinstance(node.op, ast.Mult):
+            return _strict(left * right, lhs, rhs)
+        if isinstance(node.op, (ast.FloorDiv, ast.Mod)):
+            # With a positive divisor SMT Int div rounds down, as Python does.
+            # Negate both operands for a negative divisor to preserve that floor.
+            quotient = z3.If(right > 0, left / right, (-left) / (-right))
+            value = quotient if isinstance(node.op, ast.FloorDiv) else left - right * quotient
+            return _Expression(value, z3.And(lhs.defined, rhs.defined, right != 0))
+        return None
 
-    elif isinstance(node, ast.UnaryOp):
-        operand = _ast_to_z3(node.operand, var_mapping)
+    if isinstance(node, ast.UnaryOp):
+        operand = _ast_to_z3(node.operand, variables)
         if operand is None:
             return None
-
-        if isinstance(node.op, ast.USub) and z3.is_int(operand):
-            return -operand
-        elif isinstance(node.op, ast.Not) and z3.is_bool(operand):
-            return z3.Not(operand)
-        else:
-            return None
-
-    elif isinstance(node, ast.BoolOp):
-        values = [_ast_to_z3(v, var_mapping) for v in node.values]
-        if not all(z3.is_bool(v) for v in values):
-            return None
-
-        if isinstance(node.op, ast.And):
-            return z3.And(*values)
-        elif isinstance(node.op, ast.Or):
-            return z3.Or(*values)
-        else:
-            return None
-
-    elif isinstance(node, ast.Name):
-        # Variable reference
-        return var_mapping.get(node.id)
-
-    elif isinstance(node, ast.Constant):
-        # Literal value
-        if isinstance(node.value, bool):
-            return z3.BoolVal(node.value)
-        elif isinstance(node.value, int):
-            return z3.IntVal(node.value)
-        else:
-            return None
-
-    elif isinstance(node, ast.IfExp):
-        # Ternary: x if cond else y
-        test = _ast_to_z3(node.test, var_mapping)
-        body = _ast_to_z3(node.body, var_mapping)
-        orelse = _ast_to_z3(node.orelse, var_mapping)
-        if (not z3.is_bool(test) or body is None or orelse is None
-            or not body.sort().eq(orelse.sort())):
-            return None
-        return z3.If(test, body, orelse)
-
-    else:
+        if isinstance(node.op, ast.USub) and z3.is_int(operand.value):
+            return _strict(-operand.value, operand)
+        if isinstance(node.op, ast.UAdd) and z3.is_int(operand.value):
+            return operand
+        if isinstance(node.op, ast.Not) and z3.is_bool(operand.value):
+            return _strict(z3.Not(operand.value), operand)
         return None
+
+    if isinstance(node, ast.BoolOp):
+        if not isinstance(node.op, (ast.And, ast.Or)):
+            return None
+        is_and = isinstance(node.op, ast.And)
+        value = z3.BoolVal(is_and)
+        defined = z3.BoolVal(True)
+        for inner in node.values:
+            operand = _ast_to_z3(inner, variables)
+            if operand is None or not z3.is_bool(operand.value):
+                return None
+            evaluate = value if is_and else z3.Not(value)
+            defined = z3.And(defined, z3.Implies(evaluate, operand.defined))
+            value = z3.And(value, operand.value) if is_and else z3.Or(value, operand.value)
+        return _Expression(value, defined)
+
+    if isinstance(node, ast.Name):
+        value = variables.get(node.id)
+        return None if value is None else _strict(value)
+
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool):
+            return _strict(z3.BoolVal(node.value))
+        if isinstance(node.value, int):
+            return _strict(z3.IntVal(node.value))
+        return None
+
+    if isinstance(node, ast.IfExp):
+        test = _ast_to_z3(node.test, variables)
+        yes = _ast_to_z3(node.body, variables)
+        no = _ast_to_z3(node.orelse, variables)
+        if (
+            test is None or not z3.is_bool(test.value)
+            or yes is None or no is None or not yes.value.sort().eq(no.value.sort())
+        ):
+            return None
+        return _conditional(test, yes, no)
+
+    return None
 
 
 def _z3_value_to_python(val: Any) -> Any:
@@ -497,8 +582,6 @@ def _z3_value_to_python(val: Any) -> Any:
     try:
         if z3.is_int_value(val):
             return val.as_long()
-        elif z3.is_rational_value(val):
-            return float(val.as_fraction())
         elif z3.is_true(val):
             return True
         elif z3.is_false(val):

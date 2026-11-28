@@ -1,0 +1,80 @@
+# Support boundary for issue #10.
+# The full report continues to show these IDs as missing; their original specs/tags remain intact.
+# Remove an entry only when public behavior and correctly typed evidence land.
+schema_version = 1
+
+[[deferred]]
+ids = ["HYP-005"]
+reason = "Async tests need an explicit event-loop owner. This adapter supports synchronous pytest tests."
+
+[[deferred]]
+ids = ["HYP-011", "HYP-012", "HYP-014"]
+reason = "Use explicit native strategies for non-primitive, annotated, or custom inputs. No parallel inference/registry API."
+
+[[deferred]]
+ids = ["HYP-023", "HYP-024"]
+reason = "Keep the property test separate from the contracted implementation. Use explicit native assume() when sampling needs filtering."
+
+[[deferred]]
+ids = ["HYP-060", "HYP-062", "HYP-063", "HYP-064"]
+reason = "Native pytest/Hypothesis own example statistics and failure rendering. Typed receipts record outcomes, not an adapter-specific statistics schema."
+
+[[deferred]]
+ids = ["HYP-040", "HYP-051", "HYP-052", "HYP-053"]
+reason = "Use native Hypothesis profiles and pytest selectors. No second project config or CLI override layer."
+
+[[deferred]]
+ids = ["HYP-072", "HYP-073"]
+reason = "Hypothesis owns its shrinking budget and flaky-case detection. No independent spec-test guarantee about those behaviors."
+
+[[deferred]]
+ids = ["Z3-004"]
+reason = "Runtime requires clauses are the sole assumptions. Proof-only constraints would let proofs certify fewer inputs than runtime accepts."
+
+[[deferred]]
+ids = ["Z3-005", "Z3-120", "Z3-121", "Z3-123", "Z3-124"]
+reason = "Run all runtime contracts regardless of offline proofs. No removal, per-clause bypass, or proof-generated wrappers."
+
+[[deferred]]
+ids = ["Z3-011"]
+reason = "Python float is not Real arithmetic. Defer until IEEE 754 semantics and concrete replay can be specified."
+
+[[deferred]]
+ids = ["Z3-013", "Z3-014", "Z3-040", "Z3-041", "Z3-042", "Z3-050", "Z3-051"]
+reason = "Optionals and sequences need explicit Python construction, exception, index/slice and mutation semantics. Do not approximate them with unconstrained terms."
+
+[[deferred]]
+ids = ["Z3-020"]
+reason = "The exact arithmetic slice supports +, -, *, // and %. General exponentiation and true division are not part of this proof subset."
+
+[[deferred]]
+ids = ["Z3-025"]
+reason = "Only inspected lambda contracts participate. No separate parser for string contracts."
+
+[[deferred]]
+ids = ["Z3-031"]
+reason = "Python int is unbounded. A bounded integer type must have an explicit overflow contract before it can be proved."
+
+[[deferred]]
+ids = ["Z3-060", "Z3-061", "Z3-062", "Z3-063", "Z3-133"]
+reason = "Loop invariants, induction, termination and recursive unrolling are not supported. Only the documented expression and branch subset is translated."
+
+[[deferred]]
+ids = ["Z3-081", "Z3-083"]
+reason = "Concrete named inputs in declared order plus the offending clause support Python replay. No executable-test generator or witness minimization guarantee."
+
+[[deferred]]
+ids = ["Z3-090", "Z3-091", "Z3-092", "Z3-093", "Z3-094"]
+reason = "Always obtain fresh results. Caching and incremental proofs need dependency and engine identity plus replay-safe invalidation."
+
+[[deferred]]
+ids = ["Z3-101", "Z3-102"]
+reason = "Use verify --proofs with trusted explicit proof modules. No additional proof-only or function selector command."
+
+[[deferred]]
+ids = ["Z3-107", "Z3-110", "Z3-111", "Z3-112", "Z3-113"]
+reason = "Use explicit proof modules and per-function timeout. No project-level solver profiles, tactics, parallelism, overrides, or full solver stats."
+
+[[deferred]]
+ids = ["Z3-122"]
+reason = "Unsupported source is diagnosed rather than approximated, but there is no predictive complexity metric or separate warning policy."

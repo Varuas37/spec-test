@@ -429,9 +429,24 @@ a failing check cannot be hidden by another passing one.
   an explicitly trusted runner receipt and exports the observed results. Supply
   fresh receipts from the same checkout. The schema validates shape and refuses
   duplicates, but does not authenticate the runner or source revision.
+- `spec-test verify --scope design/verification-scope.toml` keeps the full report
+  and enforces strict evidence for the supported requirements. This project's
+  [reviewed scope](design/verification-scope.toml) lists the exact deferred IDs
+  and reasons. Deferrals neither pass nor disappear; a new missing requirement,
+  unexpected evidence for a deferred ID, a linked failure, or inconclusive
+  required evidence still blocks. Plain `verify` without the scope continues to require evidence
+  for the entire automated roadmap. Treat scope edits as product decisions
+  in code review, not a way to dismiss regressions.
 - `spec-test review-packet --output review.json` exports manual and
   `[ai_review]` requirements and optional hints. It calls no AI service and does
-  not mark anything as passed.
+  not mark anything as passed. Review those items against the exact commit or
+  artifact you inspected. In your PR or review log, record the revision,
+  `spec_id`, `review_input_sha256`, reviewer, observation, and disposition
+  (accepted, rejected, or not inspected). Re-export if the inputs change.
+  The digest identifies the exported item, not the source revision or reviewer.
+  Any AI suggestion is a draft until a human checks it. Do not pass this log
+  or the packet to `verify --evidence`: manual decisions stay outside automated
+  coverage.
 
 Install `spec-test[hypothesis]` for generated implementation checks:
 

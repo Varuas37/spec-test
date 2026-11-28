@@ -116,6 +116,51 @@ def test_ai_review_packet_is_offline_and_never_credits_coverage(tmp_path):
     assert report.skipped == 1 and report.passing == 0
 
 
+@spec("EVID-010", "Offline review records bind to the exported inputs but cannot satisfy verify")
+def test_human_review_handoff_has_no_evidence_import(tmp_path, monkeypatch):
+    import hashlib
+    import socket
+
+    specs, tests, _ = subject(
+        tmp_path, "**REVIEW-001** [manual]: Check keyboard focus\n"
+    )
+    output = tmp_path / "review.json"
+    command = ["review-packet", "-s", str(specs), "-o", str(output)]
+
+    def refuse_network(*args, **kwargs):
+        raise AssertionError("review-packet must stay offline")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse_network)
+    assert CliRunner().invoke(app, command).exit_code == 0
+    original = output.read_bytes()
+    assert CliRunner().invoke(app, command).exit_code == 0
+    assert output.read_bytes() == original
+    item, = json.loads(original)["items"]
+    digest = item.pop("review_input_sha256")
+    canonical = json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    assert hashlib.sha256(canonical).hexdigest() == digest
+
+    (specs / "demo.md").write_text("**REVIEW-001** [manual]: Check pointer focus\n")
+    assert CliRunner().invoke(app, command).exit_code == 0
+    updated, = json.loads(output.read_text())["items"]
+    assert updated["review_input_sha256"] != digest
+
+    updated["status"] = "approved"
+    output.write_text(json.dumps({"schema_version": 1, "items": [updated]}))
+    verify = ["verify", "-s", str(specs), "-t", str(tests), "--evidence", str(output)]
+    assert CliRunner().invoke(app, verify).exit_code == 5
+    output.write_text(json.dumps({
+        "schema_version": 1,
+        "checks": [{
+            "spec_id": "REVIEW-001", "kind": "manual", "runner": "reviewer",
+            "name": "pointer focus", "status": "passed",
+        }],
+    }))
+    assert CliRunner().invoke(app, verify).exit_code == 5
+    report = SpecVerifier(specs, tests).verify()
+    assert report.passing == 0 and report.skipped == 1
+
+
 @specs("EVID-006", "HYP-050", "HYP-061")
 def test_hypothesis_property_is_receipted(tmp_path):
     import pytest
@@ -205,3 +250,56 @@ def test_external_proof_receipt_can_select_either_runner(tmp_path, runner):
     check["status"] = "passed"
     write()
     assert cli.invoke(app, cli_args).exit_code == 0
+
+
+@spec("HYP-055", "List discovers a property link without importing or running the test")
+def test_list_spec_indicates_a_link_not_a_result(tmp_path):
+    specs, tests, _ = subject(
+        tmp_path, "**LIST-001**: Runs a property\n**LIST-002** [property]: Only declared\n"
+    )
+    (tests / "test_property.py").write_text(
+        "raise AssertionError('do not execute this module')\n"
+        "@property_test('LIST-001')\n"
+        "def test_prop(x: int): pass\n"
+    )
+    listed = CliRunner().invoke(app, ["list-specs", "-s", str(specs), "-t", str(tests)])
+    assert listed.exit_code == 0
+    first, second = listed.output.split("LIST-002")
+    assert "LIST-001" in first and "[property] linked test (not run)" in first
+    assert "[property]" not in second
+
+
+@spec("EVID-011", "Explicit deferrals never change coverage or waive a real check")
+def test_scoped_verify_is_strict_except_reviewed_missing_evidence(tmp_path):
+    specs, tests, _ = subject(tmp_path, "**GATE-001**: Shipped\n**GATE-002**: Later\n")
+    passing = "from spec_test import spec\n@spec('GATE-001', 'shipped')\ndef test_one(): pass\n"
+    probe = tests / "test_gate.py"
+    probe.write_text(passing)
+    path = tmp_path / "scope.toml"
+    command = ["verify", "-s", str(specs), "-t", str(tests)]
+
+    def run_with_gap(spec_id):
+        path.write_text(
+            f' schema_version = 1\n [[deferred]]\n ids = ["{spec_id}"]\n reason = "Later"\n'
+        )
+        return CliRunner().invoke(app, [*command, "--scope", str(path)])
+
+    assert CliRunner().invoke(app, command).exit_code == 2
+    selected = run_with_gap("GATE-002")
+    assert selected.exit_code == 0, selected.output
+    assert "GATE-002" in selected.output and "still missing evidence" in selected.output
+    assert run_with_gap("GATE-999").exit_code == 5
+    assert run_with_gap("GATE-001").exit_code == 5
+
+    (specs / "demo.md").write_text(
+        "**GATE-001**: Shipped\n**GATE-002**: Later\n**GATE-003**: Unclassified\n"
+    )
+    assert run_with_gap("GATE-002").exit_code == 2
+    for outcome in ["assert False", "pytest.skip()"]:
+        probe.write_text(
+            passing + "import pytest\n@spec('GATE-002', 'now linked')\n"
+            + f"def test_two(): {outcome}\n"
+        )
+        rejected = run_with_gap("GATE-002")
+        assert rejected.exit_code == 5
+        assert "not an unverified item with no evidence" in rejected.output
