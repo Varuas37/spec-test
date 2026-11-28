@@ -58,10 +58,38 @@ test failure, not an implicitly discarded example. Native shrinking, example
 database reuse, and explicit replay via Hypothesis decorators still apply. Keep
 Hypothesis replay decorators such as `@example` outside `@property_test`.
 
-This scope deliberately does not infer arbitrary types, handle async tests,
-read a project-level Hypothesis configuration, or implement custom statistics
-or CLI selectors from the original spec. Native Hypothesis settings, profiles,
-and pytest reporting remain the configuration and diagnosis points.
+### Configuration, replay, and reporting
+
+Use per-property native `hypothesis.settings` objects or its keyword mapping.
+Hypothesis profiles provide suite defaults; configure them with Hypothesis
+itself (for example, in `conftest.py`). A per-property override changes only
+the specified values. `max_examples` is a generation budget, not a cap on
+calls made during shrinking or replay. A `deadline` checks an example's elapsed
+time, not a hard interrupt.
+
+For replay across runs, pass a native database such as
+`DirectoryBasedExampleDatabase(".hypothesis/examples")` via `settings` and do
+not enable `derandomize` for that property. Normal Hypothesis runs can reuse
+recorded failures. `Phase.reuse` alone explicitly replays saved cases and
+generates nothing when the database is empty. Public CLI verification records
+success and failure as property evidence; an empty replay cannot pass.
+
+Use `pytest --hypothesis-show-statistics` for native counts and rerun the
+indicated pytest test to inspect the minimized example and exception. The
+spec-test report retains check status and kind, rather than claiming counts
+or per-spec shrink statistics it does not collect.
+
+### Deferred requirements
+
+The bounded scope does not infer composite, annotated, or custom types or
+support async tests. Use explicit strategies for domain types and native
+`assume()` where appropriate; spec-test does not reorder decorators on
+implementations or translate preconditions into assumptions. There is no
+spec-test-specific global TOML config, property-only CLI selector, global
+CLI example budget, or bespoke failure categorization/statistics. Native
+Hypothesis behavior has not been replaced by spec-test reimplementations.
+The original roadmap retains these requirements separately from the supported
+contract.
 
 ## Options Considered
 
@@ -92,5 +120,5 @@ and pytest reporting remain the configuration and diagnosis points.
 ## Status
 - [x] Issue written
 - [x] Specs defined
-- [ ] Implementation complete
-- [ ] Tests passing
+- [x] Bounded adapter, native configuration and replay contract covered
+- [ ] Deferred roadmap requirements implemented and covered

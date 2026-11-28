@@ -145,9 +145,14 @@ def test_no_inference_through_arbitrary_annotation_expressions():
 def test_contract_error_from_production_function_and_shrink():
     from hypothesis import strategies as st
 
+    checked = []
     called = []
 
-    @contract(requires=[lambda amount: amount >= 0], ensures=[lambda result: result < 5])
+    def requires(amount):
+        checked.append(amount)
+        return amount >= 0
+
+    @contract(requires=[requires], ensures=[lambda result: result < 5])
     def calculate(amount: int) -> int:
         called.append(amount)
         return amount
@@ -163,7 +168,9 @@ def test_contract_error_from_production_function_and_shrink():
     with pytest.raises(ContractError) as error:
         generated()
     assert error.value.condition_type == "ensures"
+    assert checked == called
     assert called[-1] == 5
+    assert any("amount=5" in note for note in error.value.__notes__)
 
 
 @requires_hypothesis

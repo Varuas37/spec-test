@@ -53,3 +53,9 @@ jobs:
           uv run --locked spec-test verify --require-issues --specs design/specs/queue-only \
             --evidence "$RUNNER_TEMP/rust-evidence.json" \
             --evidence adapters/typescript/.vitest/spec-evidence.json
+      - name: Verify the reviewed supported requirements
+        run: |
+          uv run --locked --extra all spec-test verify --require-issues \
+            --scope design/verification-scope.toml \
+            --evidence "$RUNNER_TEMP/rust-evidence.json" \
+            --evidence adapters/typescript/.vitest/spec-evidence.json

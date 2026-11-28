@@ -8,3 +8,6 @@
 - **EVID-007**: A requirement ID with an alphanumeric prefix (for example, Z3) is discoverable and can receive evidence.
 - **EVID-008**: A function requirement is inconclusive when one of its collected parameter cases was deselected or did not run.
 - **EVID-009**: An explicit selection of one parametrized case has its own outcome, independent of siblings.
+
+- **EVID-010**: The offline review packet supplies a reproducible input digest; neither an edited packet nor a manual approval receipt satisfies automated verification.
+- **EVID-011**: A reviewed deferral identifies a missing requirement without changing its reported status. New requirements without evidence, linked failures, and inconclusive required evidence remain blocking.

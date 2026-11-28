@@ -69,7 +69,12 @@ Coverage: 50% (2/4 automated specs passing)
 | `PASS` | Test exists and passes | None |
 | `FAIL` | Test exists but fails | Fix test or implementation |
 | `PENDING` | No test found for spec | Write a test |
-| `SKIP` | Manual verification type | Human review needed |
+| `SKIP` | Manual or explicitly deferred | Check the item's reason |
+
+For manual or AI-assisted requirements, export an offline packet with
+`spec-test review-packet --output review.json`. Record the exact revision,
+requirement ID, item digest, and the human reviewer's observation and decision
+in the PR or review log. Never submit that record as a runner receipt.
 
 ### Step 3: Fix Issues
 

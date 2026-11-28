@@ -9,18 +9,30 @@ Z3 integration enables formal verification of contracts using SMT solving, provi
 
 ## Implemented subset vs. planned requirements
 
-The requirements below are the original roadmap, not a statement of current
+The requirements below include the original roadmap, not just current
 capabilities. The implementation checks synchronous functions over exact
 Python `int` and `bool` values, with an optional literal docstring and direct
 lambda pre/postconditions. Pure `if`/`elif`/`else` blocks and early returns
-are modeled using boolean conditions. Every structural path must return
+are modeled using Boolean conditions. The inspected body and each predicate must match the loaded Python code. Every structural path must return
 the declared type; contradictory branches do not exempt unsupported code or
-fallthrough. It rejects partial translation
-and unsatisfiable preconditions, keeps runtime contracts active, and returns
-concrete input values on refutation. It does not treat Python floats as Z3 Reals,
-nor model division, loops, arrays, optional values, captures, calls, or
-invariants. There is no proof cache. Do not use bounded recursive unrolling as
-evidence of an unbounded proof.
+fallthrough.
+
+**Exact integer arithmetic slice:** Unary `+`/`-`, addition, subtraction,
+multiplication, floor division and modulo on Python integers (Z3-020 subset).
+For a negative divisor, floor division still rounds toward negative infinity,
+and a nonzero remainder has the divisor's sign. A zero divisor is not a
+symbolic result: if reachable, it produces a counterexample (Z3-032).
+Boolean `and`/`or`, comparison chains, conditionals and ordered contract
+clauses only evaluate the operations that Python would reach. Counterexamples
+identify the first failing precondition, function body or postcondition and
+give concrete inputs (Z3-082). A proof still requires an actual input accepted
+by the preconditions; contradictory preconditions cannot report success.
+
+The proof does not disable runtime contracts, treat floats as Z3 Reals, or
+model `/`, `**`, loops, arrays, optional values, captures, calls or invariants.
+Additional proof-only assumptions (Z3-004), automatic executable counterexample
+generation (Z3-081) and proof caching remain planned. Do not use bounded
+recursive unrolling as evidence of an unbounded proof.
 
 `verify --proofs --proof-module PACKAGE.MODULE` imports an explicit trusted
 module to discover spec-ID proofs; repeat the option for multiple modules.
@@ -118,9 +130,14 @@ Z3 is an SMT (Satisfiability Modulo Theories) solver that can mathematically pro
 
 ### Expression Translation
 
+- **Z3-026**: Supported signed integer floor division and modulo preserve Python results, including negative divisors.
+
 - **Z3-020**: Arithmetic expressions translate to Z3 arithmetic
 
-  **Contracts:**
+  Implemented for exact integer `+`, `-`, `*`, `//`, and `%`. True division
+  and exponentiation remain outside the current slice.
+
+  **Roadmap contract:**
   - Requires: expression uses +, -, *, /, //, %, **
   - Ensures: equivalent Z3 arithmetic expression generated
 
@@ -175,8 +192,8 @@ Z3 is an SMT (Satisfiability Modulo Theories) solver that can mathematically pro
 - **Z3-032**: Verify division by zero cannot occur
 
   **Contracts:**
-  - Requires: function contains division operation
-  - Ensures: Z3 proves divisor is never zero under preconditions
+  - Requires: a supported integer floor-division or modulo operation in the body or a contract
+  - Ensures: Z3 checks that each evaluated divisor is nonzero; a reachable zero yields a concrete refutation
 
 - **Z3-033**: Verify numeric range constraints
 
@@ -302,7 +319,7 @@ Z3 is an SMT (Satisfiability Modulo Theories) solver that can mathematically pro
 
   **Contracts:**
   - Requires: counter-example generated
-  - Ensures: shows which precondition or postcondition failed
+  - Ensures: identifies the first undefined precondition, undefined function body, or failed/undefined postcondition that the concrete input reaches
 
 - **Z3-083**: Minimize counter-example when possible
 
@@ -371,23 +388,11 @@ Z3 is an SMT (Satisfiability Modulo Theories) solver that can mathematically pro
   - Requires: --proofs flag used
   - Ensures: report shows PROVEN/REFUTED/UNKNOWN per function
 
-- **Z3-104**: Exit code 3 when proofs fail
+- **Z3-104**: A refuted proof exits with code 4, independently of test coverage.
 
-  **Contracts:**
-  - Requires: any proof returns REFUTED
-  - Ensures: process exits with code 3
+- **Z3-105**: Strict verification requires a passing linked proof; an inconclusive linked proof exits with code 2 by default.
 
-- **Z3-105**: Exit code 0 when all proofs succeed or are unknown
-
-  **Contracts:**
-  - Requires: no REFUTED proofs
-  - Ensures: process exits with code 0
-
-- **Z3-106**: `--fail-on-unknown` makes UNKNOWN results fail
-
-  **Contracts:**
-  - Requires: --fail-on-unknown flag provided
-  - Ensures: exit code 3 for any UNKNOWN proofs
+- **Z3-106**: `--fail-on-unknown` exits with code 4 for UNKNOWN or SKIPPED proofs even when missing evidence is tolerated.
 
 - **Z3-107**: `--verbose` shows Z3 solver statistics
 
@@ -510,38 +515,26 @@ Z3 is an SMT (Satisfiability Modulo Theories) solver that can mathematically pro
   - Requires: Z3 proves preconditions are contradictory
   - Ensures: warning that function can never be called validly
 
+- **Z3-135**: Verification refuses source that no longer matches the loaded implementation or contract.
+
 ---
 
 ## Supported Python Subset
 
-The following Python features are translatable to Z3:
+**Supported now:**
 
-**Supported:**
-- Integer and float arithmetic
-- Boolean logic
-- Comparisons
-- Conditional expressions (ternary)
-- Simple if/else statements
-- For loops over range()
-- While loops with numeric conditions
-- List indexing and slicing (with known bounds)
-- len() on annotated sequences
-- min(), max(), abs() builtins
-- Type-annotated parameters
+- Exact integer arithmetic: `+`, `-`, `*`, `//`, and `%`.
+- Boolean logic and same-sort equality; ordered comparisons over integers.
+- Conditional expressions, pure `if`/`elif`/`else` blocks and early returns.
+- Explicitly annotated `int`/`bool` positional parameters and return type.
+- Direct lambda preconditions and postconditions without captured values.
 
-**Not Supported (returns SKIPPED):**
-- Dynamic typing (no annotations)
-- Arbitrary object attribute access
-- Method calls (except builtins)
-- String operations
-- Dictionary operations (future)
-- Set operations
-- File I/O
-- Exceptions (except for analysis)
-- Generators and iterators
-- Closures capturing mutable state
-- Global variable mutation
-- Class instance creation
+**Unsupported (returns SKIPPED):**
+
+- Floats, true division, exponentiation and mixed integer/Boolean coercion.
+- Loops, recursion, calls (including builtins), assignments, dynamic access,
+  sequences, optional values and external state.
+- Invariants and old-state contracts.
 
 ---
 
@@ -550,38 +543,24 @@ The following Python features are translatable to Z3:
 ```python
 from spec_test import contract, provable
 
-@provable
+@provable(spec="MATH-001")
+@contract(ensures=[lambda result: -2 <= result <= 0])
+def signed_remainder(x: int) -> int:
+    return x % -3
+
+@provable(spec="MATH-002")
 @contract(
-    requires=[lambda x: x >= 0],
-    ensures=[lambda result: result >= 0]
+    requires=[lambda n, d: n >= 0, lambda n, d: d >= 0],
+    ensures=[lambda result: result >= 0],
 )
-def factorial(x: int) -> int:
-    if x <= 1:
-        return 1
-    return x * factorial(x - 1)
-
-# Z3 will prove:
-# - For all x >= 0, factorial(x) >= 0
-# - No integer overflow (if check_overflow=True)
-
-@provable(timeout=60)
-@contract(
-    requires=[
-        lambda items: len(items) > 0,
-        lambda index: index >= 0
-    ],
-    ensures=[lambda result: result is not None]
-)
-def safe_get(items: List[int], index: int) -> Optional[int]:
-    if index < len(items):
-        return items[index]
-    return None
-
-# Z3 will attempt to prove:
-# - index is always valid when accessing items[index]
-# - result is not None given preconditions
-# Note: This proof may fail, revealing the index < len check is needed
+def guarded_quotient(n: int, d: int) -> int:
+    if d == 0:
+        return 0
+    return n // d
 ```
+
+Replacing the guarded body with `return n // d` gives a concrete counterexample
+with `d=0`. Both functions use the same code in proofs and runtime calls.
 
 ---
 

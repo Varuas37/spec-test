@@ -340,7 +340,7 @@ def test_cli_runs_proof_in_fresh_process(tmp_path, mode):
     import sys
     from pathlib import Path
 
-    expression = {"prove": "x + 1", "refute": "x - 1", "unsupported": "x // 1", "duplicate": "x + 1"}
+    expression = {"prove": "x + 1", "refute": "x - 1", "unsupported": "x ** 2", "duplicate": "x + 1"}
     if mode != "empty":
         (tmp_path / "sample.py").write_text(
             "from spec_test import contract, provable\n"
@@ -459,3 +459,277 @@ def test_fallthrough_and_partial_translation_never_pass():
         outcome = verify_function(fn)
         assert outcome.result is ProofResult.SKIPPED
         assert reason in outcome.message
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-002", "Proof never disables runtime preconditions")
+def test_successful_proof_does_not_disable_runtime_precondition():
+    from spec_test.contracts import ContractError
+
+    @provable(skip_runtime_if_proven=True)
+    @contract(requires=[lambda x: x >= 0], ensures=[lambda result: result > 0])
+    def increment(x: int) -> int:
+        return x + 1
+
+    assert verify_function(increment).result is ProofResult.PROVEN
+    assert increment(0) == 1
+    with pytest.raises(ContractError) as raised:
+        increment(-1)
+    assert raised.value.condition_type == "requires"
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@specs("Z3-010", "Z3-033")
+def test_unbounded_integer_types_and_range_postcondition():
+    @provable()
+    @contract(ensures=[lambda result: -1 <= result <= 0])
+    def integer_sign(x: int) -> int:
+        return -1 if x < 0 else 0
+
+    assert verify_function(integer_sign).result is ProofResult.PROVEN
+    assert integer_sign(-(1 << 256)) == -1
+    assert integer_sign(1 << 256) == 0
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-012", "Boolean parameters translate to Bool sorts")
+def test_boolean_type_and_contract():
+    @provable()
+    @contract(ensures=[lambda result: result])
+    def excluded_middle(flag: bool) -> bool:
+        return flag or not flag
+
+    assert verify_function(excluded_middle).result is ProofResult.PROVEN
+    assert excluded_middle(False) is True
+    assert excluded_middle(True) is True
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-026", "Signed integer quotient and remainder match Python")
+def test_signed_floor_division_and_modulo_match_python():
+    @provable()
+    @contract(
+        requires=[lambda x, y: y != 0, lambda x, y: -3 <= x <= 3,
+                  lambda x, y: -3 <= y <= 3],
+        ensures=[lambda result: result == 0],
+    )
+    def quotient_remainder_identity(x: int, y: int) -> int:
+        return x - (x // y) * y - x % y
+
+    @provable()
+    @contract(ensures=[lambda result: -2 <= result <= 0])
+    def negative_modulus(x: int) -> int:
+        return x % -3
+
+    @provable()
+    @contract(requires=[lambda x: 1 <= x <= 3], ensures=[lambda result: result == -1])
+    def negative_quotient(x: int) -> int:
+        return x // -3
+
+    @provable()
+    @contract(requires=[lambda x: -3 <= x <= -1], ensures=[lambda result: result == -1])
+    def negative_dividend(x: int) -> int:
+        return x // 3
+
+    for function in (
+        quotient_remainder_identity, negative_modulus, negative_quotient, negative_dividend
+    ):
+        assert verify_function(function).result is ProofResult.PROVEN
+
+    for x in range(-3, 4):
+        assert negative_modulus(x) == x % -3
+        for y in (-3, -2, -1, 1, 2, 3):
+            assert quotient_remainder_identity(x, y) == 0
+    for x in (1, 2, 3):
+        assert negative_quotient(x) == -1
+        assert negative_dividend(-x) == -1
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-032", "Zero-divisor safety follows the actual evaluated path")
+def test_safe_paths_prove_and_refutation_replays_zero_division():
+    @provable()
+    @contract(
+        requires=[lambda y: y != 0 or 2 > 3 > 5 // y],
+        ensures=[lambda result: result == result],
+    )
+    def short_circuit_and_unreachable_return(y: int) -> int:
+        if y == 0 and 3 == 3:
+            return 1 % 0
+        return (1 % y) if 1 < 0 < 5 // y else 2 // y
+
+    @provable()
+    @contract(ensures=[lambda result: result])
+    def boolean_and_short_circuit(y: int) -> bool:
+        return not (y != 0 and 1 % y < 0 and y > 0)
+
+    @provable()
+    @contract(ensures=[lambda result: result == result])
+    def missing_guard(y: int) -> int:
+        return 1 // y
+
+    assert verify_function(short_circuit_and_unreachable_return).result is ProofResult.PROVEN
+    assert short_circuit_and_unreachable_return(-3) == -1
+    assert verify_function(boolean_and_short_circuit).result is ProofResult.PROVEN
+    assert boolean_and_short_circuit(0) is True
+    outcome = verify_function(missing_guard)
+    assert outcome.result is ProofResult.REFUTED
+    assert outcome.message == "Function body can divide by zero"
+    assert outcome.counter_example == {"y": 0}
+    with pytest.raises(ZeroDivisionError):
+        missing_guard(**outcome.counter_example)
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-082", "Concrete counterexamples name their earliest failing contract clause")
+def test_ordered_preconditions_and_postconditions_report_exact_clause():
+    from spec_test.contracts import ContractError
+
+    @provable()
+    @contract(
+        requires=[lambda y: 1 // y == 1, lambda y: y != 0],
+        ensures=[lambda result: result == 1],
+    )
+    def invalid_requires(y: int) -> int:
+        return y
+
+    @provable()
+    @contract(ensures=[lambda result: result == 0, lambda result: 1 % result == 1])
+    def invalid_ensures(y: int) -> int:
+        return y
+
+    @provable()
+    @contract(ensures=[lambda result: result == 0, lambda result: result > 0])
+    def false_postcondition(y: int) -> int:
+        return y - y
+
+    for function, location in (
+        (invalid_requires, "Precondition 1 can divide by zero"),
+        (invalid_ensures, "Postcondition 2 can divide by zero"),
+    ):
+        outcome = verify_function(function)
+        assert outcome.result is ProofResult.REFUTED
+        assert outcome.message == location
+        assert outcome.counter_example == {"y": 0}
+        with pytest.raises(ZeroDivisionError):
+            function(**outcome.counter_example)
+
+    outcome = verify_function(false_postcondition)
+    assert outcome.result is ProofResult.REFUTED
+    assert outcome.message == "Postcondition 2 fails"
+    with pytest.raises(ContractError) as raised:
+        false_postcondition(**outcome.counter_example)
+    assert raised.value.condition_index == 1
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+def test_precondition_zero_guard_cannot_make_no_inputs_proven():
+    @provable()
+    @contract(
+        requires=[lambda y: y != 0, lambda y: y % y == 1],
+        ensures=[lambda result: True],
+    )
+    def no_valid_inputs(y: int) -> int:
+        return 1 // y
+
+    outcome = verify_function(no_valid_inputs)
+    assert outcome.result is ProofResult.SKIPPED
+    assert "unsatisfiable" in outcome.message
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@pytest.mark.parametrize("op", ["true division", "power"])
+def test_float_division_and_power_remain_unsupported(op):
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def true_division(x: int) -> int:
+        return x / 2
+
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def power(x: int) -> int:
+        return x ** 2
+
+    outcome = verify_function({"true division": true_division, "power": power}[op])
+    assert outcome.result is ProofResult.SKIPPED
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-072", "Native solver UNKNOWN is not misreported as proof")
+def test_native_solver_unknown_is_not_proven(monkeypatch):
+    import z3
+
+    make_solver = z3.Solver
+
+    def resource_limited_solver():
+        solver = make_solver()
+        solver.set(rlimit=1)
+        return solver
+
+    monkeypatch.setattr(z3, "Solver", resource_limited_solver)
+
+    @provable()
+    @contract(ensures=[lambda result: result >= 0])
+    def square(x: int) -> int:
+        return x * x
+
+    outcome = verify_function(square)
+    assert outcome.result is ProofResult.UNKNOWN
+    assert outcome.counter_example is None
+    assert "could not determine" in outcome.message
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-131", "Exhausting the shared deadline yields UNKNOWN with a reason")
+def test_shared_deadline_exhausted_before_domain_check(monkeypatch):
+    from types import SimpleNamespace
+
+    from spec_test import prover
+
+    ticks = iter([0.0, 0.0, 1.1, 1.1])
+    monkeypatch.setattr(prover, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+
+    @provable(timeout=1)
+    @contract(ensures=[lambda result: result == 0])
+    def zero(x: int) -> int:
+        return x - x
+
+    outcome = verify_function(zero)
+    assert outcome.result is ProofResult.UNKNOWN
+    assert outcome.counter_example is None
+    assert "timeout" in outcome.message
+
+
+@pytest.mark.skipif(not Z3_AVAILABLE, reason="Z3 not installed")
+@spec("Z3-135", "Changed source cannot certify an already loaded function or predicate")
+@pytest.mark.parametrize("stale", ["body", "predicate"])
+def test_refuses_stale_live_code(tmp_path, stale):
+    import importlib.util
+    import linecache
+
+    from spec_test import ContractError
+
+    source = tmp_path / "loaded.py"
+    body = (
+        "from spec_test import contract, provable\n"
+        "@provable()\n"
+        "@contract(ensures=[lambda result: result == 1])\n"
+        "def choose(x: int) -> int:\n"
+        "    return x - x + 0\n"
+    )
+    source.write_text(body)
+    location = importlib.util.spec_from_file_location("source_match_fixture", source)
+    module = importlib.util.module_from_spec(location)
+    location.loader.exec_module(module)
+    assert verify_function(module.choose).result is ProofResult.REFUTED
+    if stale == "body":
+        body = body.replace("x - x + 0", "x - x + 1")
+    else:
+        body = body.replace("result == 1", "result == 0")
+    source.write_text(body)
+    linecache.clearcache()
+    outcome = verify_function(module.choose)
+    assert outcome.result is ProofResult.SKIPPED
+    assert "does not uniquely match the loaded Python code" in outcome.message
+    with pytest.raises(ContractError):
+        module.choose(0)

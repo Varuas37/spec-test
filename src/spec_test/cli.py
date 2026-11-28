@@ -1,5 +1,6 @@
 """Command-line interface for spec-test."""
 
+import hashlib
 import json
 import shutil
 import stat
@@ -23,8 +24,10 @@ from .prover import (
     verify_function,
 )
 from .reporter import Reporter
+from .runner import discover_spec_test_groups
 from .trace import build_trace
 from .types import SpecStatus, VerificationType
+from .verification_scope import reviewed_gaps
 from .verifier import SpecVerifier
 
 app = typer.Typer(
@@ -135,6 +138,9 @@ def verify(
     evidence_output: Optional[Path] = typer.Option(
         None, "--evidence-output", help="Write all observed checks as JSON"
     ),
+    scope: Optional[Path] = typer.Option(
+        None, "--scope", help="Reviewed TOML deferrals; still reports every requirement"
+    ),
     require_issues: bool = typer.Option(
         False, "--require-issues", "--check-issues", help="Require valid local issue links"
     ),
@@ -145,6 +151,8 @@ def verify(
     Reads specs from markdown files, discovers @spec decorated tests,
     runs tests, and reports spec coverage. Optionally checks code coverage.
     """
+    if scope is not None and not fail_on_missing:
+        raise typer.BadParameter("--scope requires strict missing-evidence checks")
     if not proofs and (proof_module or fail_on_unknown):
         raise typer.BadParameter("Proof options require --proofs")
     if proofs:
@@ -171,9 +179,11 @@ def verify(
         proof_checks = _run_proofs(verbose) if proofs else []
         report = verifier.verify(verbose=verbose, evidence=tuple(external + proof_checks))
         known = {result.spec.id for result in report.results}
-        unknown_ids = sorted({check.spec_id for check in external} - known)
+        named_checks = external if scope is None else external + proof_checks
+        unknown_ids = sorted({check.spec_id for check in named_checks} - known)
         if unknown_ids:
             raise ValueError(f"Evidence references undefined specifications: {', '.join(unknown_ids)}")
+        gaps = reviewed_gaps(scope, report) if scope is not None else {}
         if evidence_output:
             write_evidence(evidence_output, report.evidence)
     except (OSError, ValueError) as exc:
@@ -193,6 +203,11 @@ def verify(
 
     reporter = Reporter()
     reporter.print_terminal(report)
+    if gaps:
+        console.print(
+            f"Scope decision: {len(gaps)} deferred requirements are still missing evidence.",
+            markup=False,
+        )
 
     # Run coverage analysis if requested
     coverage_percent = None
@@ -224,7 +239,7 @@ def verify(
         raise typer.Exit(code=4)
     if report.failing > 0:
         raise typer.Exit(code=1)
-    if fail_on_missing and (report.missing or report.unknown):
+    if fail_on_missing and (report.missing > len(gaps) or report.unknown):
         raise typer.Exit(code=2)
     if coverage and (coverage_percent is None or coverage_percent < coverage_threshold):
         raise typer.Exit(code=3)
@@ -355,6 +370,7 @@ def list_specs(
         "-s",
         help="Directory containing spec markdown files",
     ),
+    tests_dir: Path = typer.Option(Path("tests"), "--tests", "-t", help="Test discovery root"),
     show_issues: bool = typer.Option(
         False,
         "--show-issues",
@@ -384,8 +400,11 @@ def list_specs(
     else:
         console.print()
 
+    groups = discover_spec_test_groups(tests_dir)
     for spec in sorted(specs, key=lambda s: s.id):
         console.print(f"  [cyan]{spec.id}[/cyan]: {spec.description}")
+        if any(check.evidence_kind == "property" for check in groups.get(spec.id, ())):
+            console.print("    [property] linked test (not run)", markup=False)
         console.print(f"    [dim]{spec.source_file}:{spec.source_line}[/dim]")
 
         if show_issues:
@@ -437,7 +456,7 @@ def review_packet(
     for requirement in collect_specs(specs_dir):
         if requirement.verification_type is not VerificationType.MANUAL:
             continue
-        packet.append({
+        item = {
             "spec_id": requirement.id,
             "requirement": requirement.description,
             "source": str(requirement.source_file),
@@ -445,7 +464,11 @@ def review_packet(
             "issue_titles": [issue.title for issue in requirement.related_issues],
             "review_hint": requirement.review_notes,
             "status": "needs-human-review",
-        })
+        }
+        # Binds an external review note to the exact exported inputs, not to
+        # the code under review or the reviewer's identity.
+        encoded = json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        packet.append({**item, "review_input_sha256": hashlib.sha256(encoded).hexdigest()})
     output.write_text(
         json.dumps({"schema_version": 1, "items": packet}, indent=2) + "\n",
         encoding="utf-8",
