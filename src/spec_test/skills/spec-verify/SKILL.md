@@ -15,6 +15,23 @@ This skill guides you through running spec-test verification, interpreting resul
 - User asks to "verify specs" or "check coverage"
 - Debugging why specs are failing
 
+## Choose the evidence you need
+
+1. Use `spec-test plan` to inspect the native commands. Run
+   `spec-test run-checks --trust-repo` only for an authorized checkout.
+   A command passing does not satisfy a spec ID by itself.
+2. For navigation, generate source indexes with the Rust and TypeScript
+   adapters. Use `spec-test trace --specs design/specs --index rust.json
+   --index typescript.json --require QUEUE-001` (adjust the ID and inputs).
+   Each represented language must provide both roles. This validates links,
+   not the results of any runner.
+3. Use `spec-test verify --evidence rust-results.json
+   --evidence typescript-results.json` with fresh, trusted receipts when
+   the project uses native checks. Keep test, property, model proof, and
+   implementation proof evidence distinct. Do not turn a skipped, missing
+   or stale proof into a pass. A selected optional proof engine emits its
+   own receipt; normal Rust builds and trace do not require Kani.
+
 ## Workflow
 
 ### Step 1: Run Full Verification

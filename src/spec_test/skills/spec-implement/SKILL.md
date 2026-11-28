@@ -14,6 +14,25 @@ This skill guides you through implementing features that satisfy specifications.
 - User asks to write tests for existing specs
 - Verification shows missing test coverage
 
+## Link each rule to code and checks
+
+Keep the stable ID and wording in the Markdown requirement. A symbol can
+implement multiple IDs; add one label per ID. Label a class or type only
+when it owns the rule. That doesn't label its methods automatically.
+
+- **Python:** `@spec("QUEUE-001", "description")` marks a pytest test.
+  `@provable(spec="QUEUE-001")` can link a supported Python contract proof.
+  The Rust/TypeScript trace command does not currently index Python implementation labels.
+- **Rust:** Tag module-level functions with
+  `#[spec_test::implements("QUEUE-001")]` or tag a separate check with
+  `#[spec_test::verifies("QUEUE-001")]`. Kani is optional, and only
+  `#[kani::proof]` and an actual Kani run do the proof work.
+- **TypeScript:** Put `/** @specTestImplements QUEUE-001 */` on a named
+  implementation, class, or method. Use the Vitest adapter's
+  `specTest("QUEUE-001", "description", () => { … })` or
+  `specProperty("QUEUE-001", "description", () => { … })` to link checks.
+  These tests are not solver proofs.
+
 ## Workflow
 
 ### Step 1: Identify Specs to Implement
