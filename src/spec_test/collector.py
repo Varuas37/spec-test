@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 from .types import RelatedIssue, SpecRequirement, VerificationType
 
@@ -11,7 +11,7 @@ from .types import RelatedIssue, SpecRequirement, VerificationType
 # Or with tags: **SPEC-001** [SKIP]: Description
 # Or with multiple tags: **SPEC-001** [manual] [SKIP]: Description
 SPEC_PATTERN = re.compile(
-    r"\*\*([A-Z]+-\d+)\*\*"  # **SPEC-001**
+    r"\*\*([A-Z][A-Z0-9]*-\d+)\*\*"  # **SPEC-001**
     r"((?:\s*\[\w+\])*)"  # Optional tags like [manual] [SKIP]
     r":\s*(.+?)$",  # : Description
     re.MULTILINE,
@@ -44,7 +44,7 @@ def collect_specs(specs_dir: str | Path) -> list[SpecRequirement]:
 
     specs = []
     # Collect from all .md files in specs directory (recursive)
-    for md_file in specs_path.glob("**/*.md"):
+    for md_file in sorted(specs_path.glob("**/*.md")):
         # Skip files starting with underscore (like _index.md for internal use)
         if md_file.name.startswith("_"):
             continue
@@ -75,10 +75,16 @@ def _parse_spec_file(file_path: Path) -> Iterator[SpecRequirement]:
         tags_lower = [t.lower() for t in tags]
 
         # Determine verification type (priority: skip > manual > test)
-        if "skip" in tags_lower:
+        if {"skip", "future"} & set(tags_lower):
             verification_type = VerificationType.SKIP
-        elif "manual" in tags_lower:
+        elif {"manual", "ai_review"} & set(tags_lower):
             verification_type = VerificationType.MANUAL
+        elif "provable" in tags_lower:
+            verification_type = VerificationType.PROOF
+        elif "model" in tags_lower:
+            verification_type = VerificationType.MODEL
+        elif "property" in tags_lower:
+            verification_type = VerificationType.PROPERTY
         else:
             verification_type = VerificationType.TEST
 
@@ -89,7 +95,17 @@ def _parse_spec_file(file_path: Path) -> Iterator[SpecRequirement]:
             source_line=line_num,
             verification_type=verification_type,
             related_issues=related_issues,
+            review_notes=_review_notes(lines, line_num) if "ai_review" in tags_lower else None,
         )
+
+
+def _review_notes(lines: list[str], source_line: int) -> Optional[str]:
+    # The first line following the declaration may carry the author's review hint.
+    if source_line < len(lines):
+        note = re.fullmatch(r"\s*<!--\s*ai:\s*(.*?)\s*-->\s*", lines[source_line])
+        if note:
+            return note.group(1)
+    return None
 
 
 def _extract_related_issues(content: str, file_path: Path) -> list[RelatedIssue]:

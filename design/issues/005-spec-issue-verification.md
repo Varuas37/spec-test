@@ -77,6 +77,8 @@ FEAT-002  PASS   Another feature
 
 ## Status
 - [x] Issue written
-- [ ] Specs defined
-- [ ] Implementation complete
-- [ ] Tests passing
+- [x] Warnings plus opt-in strict link validation implemented
+- [x] Existing and broken links exercised through the CLI integration test
+
+The verifier checks local issue files only; it does not fetch external links or
+claim the linked rationale was reviewed.

@@ -306,9 +306,10 @@ $ spec-test verify --proofs --proof-module my_package.proofs --fail-on-unknown
 Proven: 1 | Refuted: 0 | Unknown: 0 | Skipped: 0
 ```
 
-The initial proof subset is a single return expression over explicit Python
-`int` and `bool` values, including arithmetic (`+`, `-`, `*`), comparisons,
-Boolean logic, and ternaries. Z3 checks the actual modeled return against every
+The proof subset uses explicit Python `int` and `bool` values, including
+arithmetic (`+`, `-`, `*`), comparisons, Boolean logic, and ternaries. Pure
+`if`/`elif`/`else` statements and early returns are supported when every
+structural path returns the declared type. Z3 checks the actual modeled return against every
 postcondition, under every precondition. Unsupported code or predicates and
 contradictory preconditions never count as proved. A refutation prints the input
 values. Runtime checks remain on. Use `--fail-on-unknown` in CI to reject skipped
@@ -413,3 +414,41 @@ MIT
 ```bash
 pip install spec-test
 ```
+
+## Verification evidence and native adapter pilots
+
+A spec tagged `[property]`, `[provable]`, or `[model]` requires the matching kind
+of evidence. Untagged requirements expect tests. A model proof is not an
+implementation proof. An expected failure, skipped case, or missing test run
+does not satisfy an automated requirement. When more than one check is linked,
+a failing check cannot be hidden by another passing one.
+
+- `spec-test verify --require-issues` checks that every requirement has an existing
+  local issue link. Without the flag, missing or broken links are warnings.
+- `spec-test verify --evidence path.json --evidence-output combined.json` consumes
+  an explicitly trusted runner receipt and exports the observed results. Supply
+  fresh receipts from the same checkout. The schema validates shape and refuses
+  duplicates, but does not authenticate the runner or source revision.
+- `spec-test review-packet --output review.json` exports manual and
+  `[ai_review]` requirements and optional hints. It calls no AI service and does
+  not mark anything as passed.
+
+Install `spec-test[hypothesis]` for generated implementation checks:
+
+```python
+from spec_test import property_test
+
+@property_test("MATH-020", "Doubling produces an even integer")
+def test_even(x: int):
+    assert (2 * x) % 2 == 0
+```
+
+The adapter accepts explicit Hypothesis strategies and settings, and keeps its
+native shrinking and replay. It does not turn generated tests into proofs.
+
+The [Rust](adapters/rust/) and [TypeScript](adapters/typescript/) pilots verify
+the same [queue admission requirement](design/specs/queue-only/queue.md).
+They produce the same receipt format without using the same test runner. Rust
+also supplies a separately runnable Kani harness; the ordinary Rust receipt
+marks it skipped. TypeScript checks the real implementation without claiming
+a TypeScript solver proof.
