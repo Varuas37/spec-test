@@ -6,3 +6,9 @@ publish = false
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
+[dependencies]
+spec_test = { package = "spec-test-macros", path = "macros" }
+
+[workspace]
+members = ["macros", "syntax", "trace"]

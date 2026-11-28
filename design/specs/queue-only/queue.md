@@ -19,3 +19,15 @@ from this exact checkout:
 spec-test verify --specs design/specs/queue-only --require-issues --evidence /tmp/rust.json \
   --evidence adapters/typescript/.vitest/spec-evidence.json --evidence-output /tmp/combined.json
 ```
+
+
+### Source links
+
+- Rust implementation: [`try_enqueue`](../../../adapters/rust/src/lib.rs).
+- Rust proof: [`proofs::queue_001_transition`](../../../adapters/rust/src/proofs/kani.rs).
+
+- TypeScript implementation: [`enqueue`](../../../adapters/typescript/src/queue.ts).
+- TypeScript checks: [Vitest examples and properties](../../../adapters/typescript/test/queue.test.ts).
+
+The source annotations share the `QUEUE-001` ID with this requirement. Use
+`spec-test trace` to locate the links at their current lines.

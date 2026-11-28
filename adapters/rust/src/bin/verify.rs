@@ -88,25 +88,15 @@ fn status(check: fn() -> Result<(), String>) -> &'static str {
 }
 
 fn main() -> ExitCode {
-    let mut args = std::env::args_os().skip(1);
-    let include_kani_placeholder = match (args.next(), args.next()) {
-        (None, None) => true,
-        (Some(flag), None) if flag == "--native-only" => false,
-        _ => {
-            eprintln!("Usage: verify [--native-only]");
-            return ExitCode::from(2);
-        }
-    };
+    if std::env::args_os().nth(1).is_some() {
+        eprintln!("Usage: verify");
+        return ExitCode::from(2);
+    }
     let examples = status(queue_examples);
     let exhaustive = status(queue_exhaustive);
-    let proof_field = if include_kani_placeholder {
-        r#",{"spec_id":"QUEUE-001","kind":"implementation-proof","runner":"kani","name":"queue_001_transition","status":"skipped","details":"This binary does not invoke Kani."}"#
-    } else {
-        ""
-    };
-    // Interpolated values come only from status() or the fixed proof placeholder.
+    // The native runner only reports the checks it actually executed.
     println!(
-        r#"{{"schema_version":1,"checks":[{{"spec_id":"QUEUE-001","kind":"test","runner":"cargo","name":"queue_examples","status":"{examples}"}},{{"spec_id":"QUEUE-001","kind":"property","runner":"cargo","name":"queue_exhaustive","status":"{exhaustive}","details":"Exhaustive 65,536 pairs of u8 inputs; not a solver proof."}}{proof_field}]}}"#
+        r#"{{"schema_version":1,"checks":[{{"spec_id":"QUEUE-001","kind":"test","runner":"cargo","name":"queue_examples","status":"{examples}"}},{{"spec_id":"QUEUE-001","kind":"property","runner":"cargo","name":"queue_exhaustive","status":"{exhaustive}","details":"Exhaustive 65,536 pairs of u8 inputs; not a solver proof."}}]}}"#
     );
     if examples == "passed" && exhaustive == "passed" {
         ExitCode::SUCCESS

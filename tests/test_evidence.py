@@ -1,6 +1,7 @@
 """Integration checks for runner evidence, issue links and exit codes."""
 
 import json
+import pytest
 
 from typer.testing import CliRunner
 
@@ -178,3 +179,29 @@ def test_values(value): assert value == 0
     results = run_tests_batch([good, bad], tmp_path)
     assert results[good] == (True, None)
     assert results[bad][0] is False and "failed" in results[bad][1]
+
+
+@pytest.mark.parametrize("runner", ["kani", "example-alternate-engine"])
+def test_external_proof_receipt_can_select_either_runner(tmp_path, runner):
+    """Exercise the receipt boundary; these fixtures do not claim real engine runs."""
+    specs, tests, _ = subject(tmp_path, "**QUEUE-901** [provable]: One queue rule\n")
+    receipt = tmp_path / "proof.json"
+    args = ["verify", "-s", str(specs), "-t", str(tests)]
+    cli = CliRunner()
+    assert cli.invoke(app, args).exit_code != 0
+
+    check = dict(spec_id="QUEUE-901", kind="model-proof", runner=runner,
+                 name="queue_rule", status="passed")
+
+    def write():
+        receipt.write_text(json.dumps({"schema_version": 1, "checks": [check]}))
+
+    cli_args = [*args, "--evidence", str(receipt)]
+    write()
+    assert cli.invoke(app, cli_args).exit_code != 0
+    check.update(kind="implementation-proof", status="unknown")
+    write()
+    assert cli.invoke(app, cli_args).exit_code != 0
+    check["status"] = "passed"
+    write()
+    assert cli.invoke(app, cli_args).exit_code == 0

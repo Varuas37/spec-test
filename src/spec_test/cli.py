@@ -13,7 +13,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from . import __version__
+from . import __version__, repo_plan
 from .collector import collect_specs
 from .evidence import Evidence, load_evidence, write_evidence
 from .prover import (
@@ -23,7 +23,7 @@ from .prover import (
     verify_function,
 )
 from .reporter import Reporter
-from . import repo_plan
+from .trace import build_trace
 from .types import SpecStatus, VerificationType
 from .verifier import SpecVerifier
 
@@ -53,6 +53,21 @@ def main(
 ):
     """spec-test: Make AI-generated code trustworthy through mathematical verification."""
     pass
+
+
+@app.command()
+def trace(
+    index: list[Path] = typer.Option(..., "--index", help="Versioned source annotation index (repeatable)"),
+    specs_dir: Path = typer.Option(Path("design/specs"), "--specs"),
+    required: Optional[list[str]] = typer.Option(None, "--require", help="Required spec ID"),
+) -> None:
+    """List source links for requirements. Trace links are not verification evidence."""
+    try:
+        result = build_trace(specs_dir, index, required or [])
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(json.dumps(result, indent=2))
 
 
 @app.command()

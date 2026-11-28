@@ -23,14 +23,31 @@ jobs:
         run: uv run --locked --extra all pytest -q
       - name: Rust tests and evidence
         run: |
-          cargo test --locked --manifest-path adapters/rust/Cargo.toml
+          cargo test --locked --workspace --manifest-path adapters/rust/Cargo.toml
           cargo run --locked --quiet --manifest-path adapters/rust/Cargo.toml --bin verify > "$RUNNER_TEMP/rust-evidence.json"
-      - name: Kani receipt parser and refusal tests
-        run: uv run --locked python -m unittest discover -s adapters/rust -p 'test_verify_kani.py'
+      - name: Validate Rust source links
+        run: |
+          mapfile -d '' -t sources < <(git ls-files -z -- 'adapters/rust/src/*.rs')
+          cargo run --locked --quiet --manifest-path adapters/rust/Cargo.toml \
+            -p spec-test-rust-trace -- "${sources[@]}" > "$RUNNER_TEMP/rust-trace.json"
+          uv run --locked spec-test trace --specs design/specs/queue-only \
+            --index "$RUNNER_TEMP/rust-trace.json" --require QUEUE-001
+      - name: Optional proof adapter parser tests
+        run: uv run --locked python -m unittest discover -s adapters/rust -p 'test_verify_*.py'
       - name: TypeScript tests and evidence
         run: |
           npm --prefix adapters/typescript ci --no-audit --no-fund
           npm --prefix adapters/typescript run verify
+      - name: Validate TypeScript source links
+        run: |
+          node --test adapters/typescript/trace.test.mjs
+          node adapters/typescript/trace.mjs adapters/typescript/src/queue.ts \
+            adapters/typescript/test/queue.test.ts > "$RUNNER_TEMP/ts-trace.json"
+          uv run --locked spec-test trace --specs design/specs/queue-only \
+            --index "$RUNNER_TEMP/ts-trace.json" --require QUEUE-001
+          uv run --locked spec-test trace --specs design/specs/queue-only \
+            --index "$RUNNER_TEMP/rust-trace.json" --index "$RUNNER_TEMP/ts-trace.json" \
+            --require QUEUE-001
       - name: Combine the actual native receipts
         run: |
           uv run --locked spec-test verify --require-issues --specs design/specs/queue-only \

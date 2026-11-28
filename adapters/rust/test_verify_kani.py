@@ -29,7 +29,7 @@ def empty_receipt() -> dict:
         "project": {"workspace_root": str(root), "crate_name": ["spec_test_rust_queue", "verify"]},
         "harness_metadata": [{
             "pretty_name": name, "crate_name": "spec_test_rust_queue",
-            "source": {"file": "src/lib.rs"},
+            "source": {"file": "src/proofs/kani.rs"},
             "attributes": {"kind": "Proof", "should_panic": False},
         }],
         "verification_results": {
